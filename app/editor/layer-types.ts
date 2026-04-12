@@ -2,6 +2,7 @@ export type StatKey =
   | "distance"
   | "duration"
   | "avgSpeed"
+  | "maxSpeed"
   | "heartRate"
   | "elevation"
   | "calories";

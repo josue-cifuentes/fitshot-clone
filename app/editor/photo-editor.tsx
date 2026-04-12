@@ -20,7 +20,11 @@ import {
   Rect,
   Stage,
   Text,
+  Transformer,
 } from "react-konva";
+import type { Group as KonvaGroup } from "konva/lib/Group";
+import type { KonvaEventObject } from "konva/lib/Node";
+import type { Transformer as KonvaTransformer } from "konva/lib/shapes/Transformer";
 import { IconLayers } from "@/app/components/nav-icons";
 import { summaryPolylineToFlatPoints } from "@/lib/strava-polyline";
 import {
@@ -36,6 +40,7 @@ import type { LayerToggles, StatKey } from "./layer-types";
 import { LayoutPicker } from "./layout-picker";
 import {
   layersForPreset,
+  mapScaleForPreset,
   preferredExportForPreset,
   type PresetId,
 } from "./preset-config";
@@ -53,14 +58,16 @@ const THEME = {
   muted: "rgba(245,245,245,0.55)",
 };
 
-const STAT_VALUE_PX = 24;
-const STAT_LABEL_PX = 11;
+const STORY_BASE_H = STORY_H;
+const DEFAULT_STAT_VALUE_STORY = 36;
+const DEFAULT_STAT_LABEL_STORY = 13;
+const TITLE_STORY_PX = 28;
+const DATE_STORY_PX = 16;
+const NOTCH_PAD_STORY = 72;
+const WATERMARK_DISPLAY = "Made with FitShot\nby Josue Cifuentes";
 
 const TOP_W = CANVAS_W - 56;
-const TOP_H = 124;
-const BOTTOM_W = CANVAS_W - 56;
-const BOTTOM_H = 148;
-const BOTTOM_H_MINIMAL = 118;
+const TOP_H = 168;
 const MAP_CARD_W = 302;
 const MAP_CARD_H = 218;
 const MAP_PAD_X = 16;
@@ -68,13 +75,11 @@ const MAP_HEADER_H = 34;
 const ROUTE_BASE_W = MAP_CARD_W - MAP_PAD_X * 2;
 const ROUTE_BASE_H = MAP_CARD_H - MAP_HEADER_H - MAP_PAD_X - 10;
 
-const SIDE_COL_W = 300;
-const DARK_CARD_W = 700;
-
 const STAT_ORDER: StatKey[] = [
   "distance",
   "duration",
   "avgSpeed",
+  "maxSpeed",
   "heartRate",
   "elevation",
   "calories",
@@ -84,6 +89,7 @@ const STAT_ICONS: Record<StatKey, { d: string; fill?: string }> = {
   distance: { d: "M3 19.5h18M6.5 15.5L12 8l5.5 7.5" },
   duration: { d: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm0-12v5l3 2" },
   avgSpeed: { d: "M4 17L13 8l3 3-7 7M16 11l4-4" },
+  maxSpeed: { d: "M13 3 3 13M9 21l10-10M17 7l4 4" },
   heartRate: {
     d: "M12 20s-7-4.35-7-9.2A4.2 4.2 0 0 1 12 6.5a4.2 4.2 0 0 1 7 4.3c0 4.85-7 9.2-7 9.2Z",
     fill: "rgba(232,255,0,0.35)",
@@ -97,31 +103,41 @@ const STAT_ICONS: Record<StatKey, { d: string; fill?: string }> = {
 
 type ExportFormat = "feed" | "story";
 
+type OverlayId = "header" | "map" | "stack" | "watermark";
+
 type EditorPositions = {
-  top: { x: number; y: number };
-  bottom: { x: number; y: number };
+  header: { x: number; y: number };
   map: { x: number; y: number };
-  sideColumn: { x: number; y: number };
-  storyStack: { x: number; y: number };
-  darkCard: { x: number; y: number };
+  stack: { x: number; y: number };
+  watermark: { x: number; y: number };
 };
 
+type OverlayScale = { scaleX: number; scaleY: number };
+
 function initialPositions(preset: PresetId, canvasH: number): EditorPositions {
-  const cardH = Math.min(720, Math.max(480, Math.round(canvasH * 0.4)));
-  const bh = preset === "minimal" ? BOTTOM_H_MINIMAL : BOTTOM_H;
-  const bottomY = canvasH - bh - 28;
-  const mapCorner = {
-    x: CANVAS_W - MAP_CARD_W - 32,
-    y: canvasH - MAP_CARD_H - 36,
-  };
-  const mapFocus = { x: 24, y: 24 };
+  const cScale = canvasH / STORY_BASE_H;
+  const mapScale = mapScaleForPreset(preset);
+  const mw = MAP_CARD_W * mapScale;
   return {
-    top: { x: 28, y: 24 },
-    bottom: { x: 28, y: bottomY },
-    map: preset === "mapFocus" ? mapFocus : mapCorner,
-    sideColumn: { x: CANVAS_W - 24 - SIDE_COL_W, y: 96 },
-    storyStack: { x: 44, y: Math.round(canvasH * 0.08) },
-    darkCard: { x: (CANVAS_W - DARK_CARD_W) / 2, y: (canvasH - cardH) / 2 },
+    header: { x: Math.round(28 * cScale), y: Math.round(NOTCH_PAD_STORY * cScale) },
+    map: {
+      x: CANVAS_W - mw - Math.round(28 * cScale),
+      y: Math.round(88 * cScale),
+    },
+    stack: { x: Math.round(32 * cScale), y: canvasH * 0.75 },
+    watermark: {
+      x: Math.round(28 * cScale),
+      y: canvasH - Math.round(96 * cScale),
+    },
+  };
+}
+
+function initialOverlayScales(): Record<OverlayId, OverlayScale> {
+  return {
+    header: { scaleX: 1, scaleY: 1 },
+    map: { scaleX: 1, scaleY: 1 },
+    stack: { scaleX: 1, scaleY: 1 },
+    watermark: { scaleX: 1, scaleY: 1 },
   };
 }
 
@@ -302,92 +318,124 @@ async function stageToBlob(stage: KonvaStage): Promise<Blob | null> {
   return res.blob();
 }
 
-function LayersPanel({
+const CHIP_STATS: { key: StatKey; label: string }[] = [
+  { key: "distance", label: "Distance" },
+  { key: "duration", label: "Duration" },
+  { key: "avgSpeed", label: "Avg speed" },
+  { key: "maxSpeed", label: "Max speed" },
+  { key: "heartRate", label: "Heart rate" },
+  { key: "elevation", label: "Elevation" },
+  { key: "calories", label: "Calories" },
+];
+
+function chipClass(on: boolean): string {
+  return `rounded-full border px-3 py-2 text-left text-xs font-bold transition ${
+    on
+      ? "border-[#E8FF00] bg-[#0A0A0A] text-[#E8FF00] shadow-[0_0_0_1px_rgba(232,255,0,0.25)]"
+      : "border-[#F5F5F5]/15 bg-[#F5F5F5]/[0.04] text-[#F5F5F5]/35"
+  }`;
+}
+
+function EditorSidebarPanel({
   layers,
   toggle,
   setAllStats,
-  checkClass,
-  labelClass,
+  statValuePx,
+  setStatValuePx,
+  showWatermark,
+  setShowWatermark,
 }: {
   layers: LayerToggles;
   toggle: (key: keyof LayerToggles) => void;
   setAllStats: (on: boolean) => void;
-  checkClass: string;
-  labelClass: string;
+  statValuePx: number;
+  setStatValuePx: (n: number) => void;
+  showWatermark: boolean;
+  setShowWatermark: (v: boolean) => void;
 }) {
   return (
     <>
       <div>
         <h2 className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-[#F5F5F5]/45">
-          Layers
+          Overlays
         </h2>
         <p className="mt-1 text-xs text-[#F5F5F5]/40">
-          Toggle overlays. Groups are draggable on the canvas.
+          Tap chips to show or hide. Tap canvas groups to resize with handles.
         </p>
       </div>
 
-      <div className="space-y-2">
-        {(
-          [
-            ["topBar", "Top bar (title & date)"],
-            ["bottomBar", "Bottom stats bar"],
-            ["map", "Route map"],
-          ] as const
-        ).map(([key, lbl]) => (
-          <label key={key} className="block">
-            <input
-              type="checkbox"
-              className={checkClass}
-              checked={layers[key]}
-              onChange={() => toggle(key)}
-            />
-            <span className={labelClass}>{lbl}</span>
-          </label>
-        ))}
+      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[#F5F5F5]/12 bg-[#F5F5F5]/[0.04] px-3 py-2.5">
+        <input
+          type="checkbox"
+          className="h-4 w-4 accent-[#E8FF00]"
+          checked={showWatermark}
+          onChange={(e) => setShowWatermark(e.target.checked)}
+        />
+        <span className="text-sm font-semibold text-[#F5F5F5]">
+          “Powered by” watermark
+        </span>
+      </label>
+
+      <div>
+        <label className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wider text-[#F5F5F5]/45">
+          Stat value size ({statValuePx}px)
+        </label>
+        <input
+          type="range"
+          min={12}
+          max={48}
+          value={statValuePx}
+          onChange={(e) => setStatValuePx(Number(e.target.value))}
+          className="w-full accent-[#E8FF00]"
+        />
       </div>
 
       <div className="border-t border-[#F5F5F5]/10 pt-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-[#F5F5F5]/45">
-            Stats
+            On canvas
           </span>
           <div className="flex gap-1">
             <button
               type="button"
               onClick={() => setAllStats(true)}
-              className="min-h-9 rounded-md px-2 py-1 text-xs font-bold text-[#E8FF00] hover:bg-[#E8FF00]/10"
+              className="rounded-md px-2 py-1 text-[11px] font-bold text-[#E8FF00] hover:bg-[#E8FF00]/10"
             >
-              All
+              All stats
             </button>
             <button
               type="button"
               onClick={() => setAllStats(false)}
-              className="min-h-9 rounded-md px-2 py-1 text-xs font-bold text-[#F5F5F5]/40 hover:bg-[#F5F5F5]/5"
+              className="rounded-md px-2 py-1 text-[11px] font-bold text-[#F5F5F5]/40 hover:bg-[#F5F5F5]/5"
             >
               None
             </button>
           </div>
         </div>
-        <div className="space-y-2">
-          {(
-            [
-              ["distance", "Distance"],
-              ["duration", "Duration"],
-              ["avgSpeed", "Avg speed"],
-              ["heartRate", "Heart rate"],
-              ["elevation", "Elevation"],
-              ["calories", "Calories"],
-            ] as const
-          ).map(([key, lbl]) => (
-            <label key={key} className="block">
-              <input
-                type="checkbox"
-                className={checkClass}
-                checked={layers[key]}
-                onChange={() => toggle(key)}
-              />
-              <span className={labelClass}>{lbl}</span>
-            </label>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={() => toggle("topBar")}
+            className={chipClass(layers.topBar)}
+          >
+            Header · title &amp; date
+          </button>
+          <button
+            type="button"
+            onClick={() => toggle("map")}
+            className={chipClass(layers.map)}
+          >
+            Route map
+          </button>
+          {CHIP_STATS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => toggle(key)}
+              className={chipClass(layers[key])}
+            >
+              {label}
+            </button>
           ))}
         </div>
       </div>
@@ -405,11 +453,21 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const canvasHostRef = useRef<HTMLDivElement | null>(null);
   const mediaKonvaRef = useRef<KonvaImageShape | null>(null);
   const videoFileRef = useRef<File | null>(null);
+  const transformerRef = useRef<KonvaTransformer | null>(null);
+  const headerGroupRef = useRef<KonvaGroup | null>(null);
+  const mapGroupRef = useRef<KonvaGroup | null>(null);
+  const stackGroupRef = useRef<KonvaGroup | null>(null);
+  const watermarkGroupRef = useRef<KonvaGroup | null>(null);
+  const pinchStart = useRef<{
+    dist: number;
+    scaleX: number;
+    scaleY: number;
+  } | null>(null);
 
   const [presetId, setPresetId] = useState<PresetId>("full");
   const [layoutTransition, setLayoutTransition] = useState(false);
 
-  const [exportFormat, setExportFormat] = useState<ExportFormat>("feed");
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("story");
   const canvasH = exportFormat === "feed" ? FEED_H : STORY_H;
 
   const [photo, setPhoto] = useState<HTMLImageElement | null>(null);
@@ -432,13 +490,22 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const [layersOpen, setLayersOpen] = useState(false);
   const [viewScale, setViewScale] = useState(0.35);
 
+  const [statValuePx, setStatValuePx] = useState(DEFAULT_STAT_VALUE_STORY);
+  const [showWatermark, setShowWatermark] = useState(true);
+  const [selectedOverlay, setSelectedOverlay] = useState<OverlayId | null>(null);
+  const [overlayScales, setOverlayScales] = useState<Record<OverlayId, OverlayScale>>(
+    () => initialOverlayScales()
+  );
+
   const [positions, setPositions] = useState<EditorPositions>(() =>
-    initialPositions("full", FEED_H)
+    initialPositions("full", STORY_H)
   );
 
   const applyPreset = useCallback((id: PresetId, canvasHeight: number) => {
     setPresetId(id);
     setLayers(layersForPreset(id));
+    setOverlayScales(initialOverlayScales());
+    setSelectedOverlay(null);
     const pref = preferredExportForPreset(id);
     if (pref === "story") {
       setExportFormat("story");
@@ -471,6 +538,8 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
       setExportFormat(f);
       const h = f === "feed" ? FEED_H : STORY_H;
       setPositions(initialPositions(presetId, h));
+      setOverlayScales(initialOverlayScales());
+      setSelectedOverlay(null);
     },
     [presetId]
   );
@@ -512,31 +581,30 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
 
   const showHr = heartRateVisible(selected);
 
-  const mapFocusDims = useMemo(() => {
-    const mw = Math.round(CANVAS_W * 0.4);
-    const mh = canvasH - 48;
-    const routeW = mw - MAP_PAD_X * 2;
-    const routeH = mh - MAP_HEADER_H - MAP_PAD_X - 10;
-    return { mw, mh, routeW, routeH };
-  }, [canvasH]);
+  const canvasScale = canvasH / STORY_BASE_H;
+  const effectiveValuePx = Math.max(
+    10,
+    Math.round(statValuePx * canvasScale)
+  );
+  const effectiveLabelPx = Math.max(
+    8,
+    Math.round((DEFAULT_STAT_LABEL_STORY * (statValuePx / DEFAULT_STAT_VALUE_STORY)) * canvasScale)
+  );
+  const titlePx = Math.max(14, Math.round(TITLE_STORY_PX * canvasScale));
+  const datePx = Math.max(10, Math.round(DATE_STORY_PX * canvasScale));
+  const watermarkFontPx = Math.max(8, Math.round(10 * canvasScale));
 
-  const routePointsDefault = useMemo(() => {
+  const mapBaseW = MAP_CARD_W * mapScaleForPreset(presetId);
+  const mapBaseH = MAP_CARD_H * mapScaleForPreset(presetId);
+  const routeW = mapBaseW - MAP_PAD_X * 2;
+  const routeH = mapBaseH - MAP_HEADER_H - MAP_PAD_X - 10;
+
+  const routePoints = useMemo(() => {
     const encoded = selected?.map?.summary_polyline;
-    return summaryPolylineToFlatPoints(encoded, ROUTE_BASE_W, ROUTE_BASE_H, 4);
-  }, [selected]);
+    return summaryPolylineToFlatPoints(encoded, routeW, routeH, 4);
+  }, [selected, routeW, routeH]);
 
-  const routePointsMapFocus = useMemo(() => {
-    const encoded = selected?.map?.summary_polyline;
-    return summaryPolylineToFlatPoints(
-      encoded,
-      mapFocusDims.routeW,
-      mapFocusDims.routeH,
-      4
-    );
-  }, [selected, mapFocusDims]);
-
-  const hasRouteDefault = routePointsDefault.length >= 4;
-  const hasRouteFocus = routePointsMapFocus.length >= 4;
+  const hasRoute = routePoints.length >= 4;
 
   const statValues = useMemo(() => {
     if (!selected) {
@@ -544,6 +612,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
         distance: "—",
         duration: "—",
         avgSpeed: "—",
+        maxSpeed: "—",
         heartRate: "—",
         elevation: "—",
         calories: "—",
@@ -553,6 +622,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
       distance: formatDistanceMeters(selected.distance),
       duration: formatDuration(selected.moving_time),
       avgSpeed: formatSpeedMps(selected.average_speed),
+      maxSpeed: formatSpeedMps(selected.max_speed),
       heartRate: showHr
         ? formatHeartRate(selected.average_heartrate ?? undefined)
         : "—",
@@ -562,39 +632,39 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   }, [selected, showHr]);
 
   const visibleStats = STAT_ORDER.filter((k) => layers[k]);
+  const showStatStack = visibleStats.length > 0;
+  const stackRowH = effectiveValuePx + effectiveLabelPx + Math.round(28 * canvasScale);
+  const stackPad = Math.round(28 * canvasScale);
+  const stackInnerW = CANVAS_W - Math.round(64 * canvasScale);
+  const stackPanelH = showStatStack
+    ? stackPad * 2 + visibleStats.length * stackRowH + Math.round(8 * canvasScale)
+    : 0;
+  const stackMaxY = canvasH - Math.round(120 * canvasScale);
 
-  const bottomBarH =
-    presetId === "minimal" ? BOTTOM_H_MINIMAL : BOTTOM_H;
-
-  const bottomStatLayout = useMemo(() => {
-    const stats = STAT_ORDER.filter((k) => layers[k]);
-    if (!layers.bottomBar || stats.length === 0) {
-      return { cells: [] as { key: StatKey; x: number; w: number }[] };
+  useEffect(() => {
+    if (!showWatermark && selectedOverlay === "watermark") {
+      setSelectedOverlay(null);
     }
-    const gap = 18;
-    const innerPad = 36;
-    const innerW = BOTTOM_W - innerPad * 2;
-    const n = stats.length;
-    const cellW = Math.min(168, (innerW - gap * (n - 1)) / n);
-    const rowW = n * cellW + (n - 1) * gap;
-    let x = innerPad + (innerW - rowW) / 2;
-    const cells = stats.map((key) => {
-      const cx = x;
-      x += cellW + gap;
-      return { key, x: cx, w: cellW };
-    });
-    return { cells };
-  }, [layers]);
+  }, [showWatermark, selectedOverlay]);
 
-  const showClassicBottom =
-    (presetId === "minimal" || presetId === "full") &&
-    layers.bottomBar &&
-    visibleStats.length > 0;
-
-  const showClassicMap =
-    (presetId === "minimal" || presetId === "full") && layers.map;
-
-  const showClassicTop = presetId === "full" && layers.topBar;
+  useEffect(() => {
+    const tr = transformerRef.current;
+    if (!tr) return;
+    const map: Record<OverlayId, KonvaGroup | null> = {
+      header: headerGroupRef.current,
+      map: mapGroupRef.current,
+      stack: stackGroupRef.current,
+      watermark: watermarkGroupRef.current,
+    };
+    const node = selectedOverlay ? map[selectedOverlay] : null;
+    if (node) {
+      tr.nodes([node]);
+      tr.moveToTop();
+    } else {
+      tr.nodes([]);
+    }
+    tr.getLayer()?.batchDraw();
+  }, [selectedOverlay, showStatStack, showWatermark, canvasH]);
 
   const onPickMedia = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -695,7 +765,13 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const getExportBlob = useCallback(async () => {
     const stage = stageRef.current;
     if (!stage) return null;
-    return stageToBlob(stage);
+    transformerRef.current?.hide();
+    try {
+      return await stageToBlob(stage);
+    } finally {
+      transformerRef.current?.show();
+      stage.batchDraw();
+    }
   }, []);
 
   const shareOrExportVideo = useCallback(async () => {
@@ -802,20 +878,15 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
       distance: on,
       duration: on,
       avgSpeed: on,
+      maxSpeed: on,
       heartRate: on,
       elevation: on,
       calories: on,
     }));
   }, []);
 
-  const checkClass = "peer sr-only";
-  const labelClass =
-    "glass-panel flex min-h-12 cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold text-[#F5F5F5] transition-colors peer-checked:border-[#E8FF00]/50 peer-checked:bg-[#E8FF00]/[0.08] sm:min-h-0 sm:rounded-lg sm:py-2";
-
   const previewW = CANVAS_W * viewScale;
   const previewH = canvasH * viewScale;
-
-  const darkCardH = Math.min(720, Math.max(480, Math.round(canvasH * 0.4)));
 
   const mediaCover = useMemo(() => {
     if (photo) {
@@ -837,38 +908,35 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
     return coverLayout(CANVAS_W, canvasH, CANVAS_W, canvasH);
   }, [photo, videoEl, videoIntrinsic, canvasH]);
 
-  const statLabel = (text: string, x: number, y: number, w: number) => (
-    <Text
-      x={x}
-      y={y}
-      width={w}
-      text={text}
-      fontSize={STAT_LABEL_PX}
-      fontStyle="bold"
-      fontFamily="Inter, system-ui, sans-serif"
-      fill={THEME.muted}
-      letterSpacing={1.2}
-    />
-  );
-
   const mediaSource = photo ?? videoEl ?? undefined;
 
-  const storyStats = STAT_ORDER.filter((k) => layers[k]);
-  const storyPanelH = Math.min(
-    canvasH - 160,
-    storyStats.length * 72 + 100
-  );
+  const stackGlassFill =
+    presetId === "darkCard"
+      ? "rgba(10,10,12,0.88)"
+      : THEME.glassFill;
+
+  const bindTransformEnd = useCallback((id: OverlayId) => {
+    return (e: KonvaEventObject<Event>) => {
+      const t = e.target as KonvaGroup;
+      setOverlayScales((p) => ({
+        ...p,
+        [id]: { scaleX: t.scaleX(), scaleY: t.scaleY() },
+      }));
+    };
+  }, []);
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-3 font-[family-name:var(--font-inter)] sm:gap-4 lg:max-w-6xl">
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:items-start lg:gap-6">
-        <aside className="glass-panel hidden w-64 shrink-0 space-y-4 rounded-2xl p-4 lg:block">
-          <LayersPanel
+        <aside className="glass-panel hidden w-72 shrink-0 space-y-4 rounded-2xl p-4 lg:block">
+          <EditorSidebarPanel
             layers={layers}
             toggle={toggle}
             setAllStats={setAllStats}
-            checkClass={checkClass}
-            labelClass={labelClass}
+            statValuePx={statValuePx}
+            setStatValuePx={setStatValuePx}
+            showWatermark={showWatermark}
+            setShowWatermark={setShowWatermark}
           />
         </aside>
 
@@ -963,17 +1031,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
               >
                 <button
                   type="button"
-                  onClick={() => setExportFormatAndReset("feed")}
-                  className={`min-h-11 flex-1 rounded-xl px-3 text-xs font-extrabold transition sm:min-h-9 sm:rounded-full sm:px-4 sm:text-sm ${
-                    exportFormat === "feed"
-                      ? "bg-[#E8FF00] text-[#0A0A0A] shadow-md"
-                      : "text-[#F5F5F5]/50"
-                  }`}
-                >
-                  Feed 1080×1080
-                </button>
-                <button
-                  type="button"
                   onClick={() => setExportFormatAndReset("story")}
                   className={`min-h-11 flex-1 rounded-xl px-3 text-xs font-extrabold transition sm:min-h-9 sm:rounded-full sm:px-4 sm:text-sm ${
                     exportFormat === "story"
@@ -981,7 +1038,18 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                       : "text-[#F5F5F5]/50"
                   }`}
                 >
-                  Story 1080×1920
+                  Story 9:16
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExportFormatAndReset("feed")}
+                  className={`min-h-11 flex-1 rounded-xl px-3 text-xs font-extrabold transition sm:min-h-9 sm:rounded-full sm:px-4 sm:text-sm ${
+                    exportFormat === "feed"
+                      ? "bg-[#E8FF00] text-[#0A0A0A] shadow-md"
+                      : "text-[#F5F5F5]/50"
+                  }`}
+                >
+                  Feed 1:1
                 </button>
               </div>
 
@@ -1042,7 +1110,15 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                   transformOrigin: "top left",
                 }}
               >
-                <Stage width={CANVAS_W} height={canvasH} ref={stageRef}>
+                <Stage
+                  width={CANVAS_W}
+                  height={canvasH}
+                  ref={stageRef}
+                  onMouseDown={(e) => {
+                    const st = e.target.getStage();
+                    if (st && e.target === st) setSelectedOverlay(null);
+                  }}
+                >
                   <Layer>
                     {mediaSource ? (
                       <KonvaImage
@@ -1068,10 +1144,13 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                       />
                     )}
 
-                    {showClassicTop ? (
+                    {layers.topBar ? (
                       <Group
-                        x={positions.top.x}
-                        y={positions.top.y}
+                        ref={headerGroupRef}
+                        x={positions.header.x}
+                        y={positions.header.y}
+                        scaleX={overlayScales.header.scaleX}
+                        scaleY={overlayScales.header.scaleY}
                         draggable
                         dragBoundFunc={(pos) =>
                           clampOverlay(pos, TOP_W, TOP_H, CANVAS_W, canvasH)
@@ -1079,9 +1158,14 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                         onDragEnd={(e) =>
                           setPositions((p) => ({
                             ...p,
-                            top: { x: e.target.x(), y: e.target.y() },
+                            header: { x: e.target.x(), y: e.target.y() },
                           }))
                         }
+                        onMouseDown={(e) => {
+                          e.cancelBubble = true;
+                          setSelectedOverlay("header");
+                        }}
+                        onTransformEnd={bindTransformEnd("header")}
                       >
                         <Rect
                           width={TOP_W}
@@ -1100,7 +1184,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                           y={28}
                           width={TOP_W - 56}
                           text={titleText}
-                          fontSize={32}
+                          fontSize={titlePx}
                           fontStyle="bold"
                           fontFamily="Inter, system-ui, sans-serif"
                           fill={THEME.accent}
@@ -1110,11 +1194,11 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                         {dateText ? (
                           <Text
                             x={28}
-                            y={76}
+                            y={28 + titlePx + 12}
                             width={TOP_W - 56}
                             text={dateText}
-                            fontSize={16}
-                            fontStyle="bold"
+                            fontSize={datePx}
+                            fontStyle="normal"
                             fontFamily="Inter, system-ui, sans-serif"
                             fill={THEME.muted}
                             letterSpacing={0.2}
@@ -1123,99 +1207,19 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                       </Group>
                     ) : null}
 
-                    {showClassicBottom ? (
+                    {layers.map ? (
                       <Group
-                        x={positions.bottom.x}
-                        y={positions.bottom.y}
-                        draggable
-                        dragBoundFunc={(pos) =>
-                          clampOverlay(
-                            pos,
-                            BOTTOM_W,
-                            bottomBarH,
-                            CANVAS_W,
-                            canvasH
-                          )
-                        }
-                        onDragEnd={(e) =>
-                          setPositions((p) => ({
-                            ...p,
-                            bottom: { x: e.target.x(), y: e.target.y() },
-                          }))
-                        }
-                      >
-                        <Rect
-                          width={BOTTOM_W}
-                          height={bottomBarH}
-                          cornerRadius={22}
-                          fill={THEME.glassFill}
-                          stroke={THEME.glassStroke}
-                          strokeWidth={1}
-                          shadowColor="rgba(0,0,0,0.5)"
-                          shadowBlur={28}
-                          shadowOffsetY={10}
-                          shadowOpacity={0.5}
-                        />
-                        {bottomStatLayout.cells.map(({ key, x: cx, w: cw }) => (
-                          <Group key={key} x={cx} y={presetId === "minimal" ? 18 : 34}>
-                            <StatIcon
-                              kind={key}
-                              x={(cw - 26) / 2}
-                              y={0}
-                              strokeColor={THEME.accent}
-                            />
-                            {presetId === "minimal" ? (
-                              <>
-                                {statLabel(
-                                  key === "distance"
-                                    ? "DISTANCE"
-                                    : "TIME",
-                                  0,
-                                  44,
-                                  cw
-                                )}
-                                <Text
-                                  x={0}
-                                  y={62}
-                                  width={cw}
-                                  align="center"
-                                  text={statValues[key]}
-                                  fontSize={STAT_VALUE_PX}
-                                  fontStyle="bold"
-                                  fontFamily="Inter, system-ui, sans-serif"
-                                  fill={valueColor(key)}
-                                  letterSpacing={-0.3}
-                                />
-                              </>
-                            ) : (
-                              <Text
-                                x={0}
-                                y={34}
-                                width={cw}
-                                align="center"
-                                text={statValues[key]}
-                                fontSize={STAT_VALUE_PX}
-                                fontStyle="bold"
-                                fontFamily="Inter, system-ui, sans-serif"
-                                fill={valueColor(key)}
-                                letterSpacing={-0.3}
-                              />
-                            )}
-                          </Group>
-                        ))}
-                      </Group>
-                    ) : null}
-
-                    {presetId === "mapFocus" && layers.map ? (
-                      <Group
+                        ref={mapGroupRef}
                         x={positions.map.x}
                         y={positions.map.y}
+                        scaleX={overlayScales.map.scaleX}
+                        scaleY={overlayScales.map.scaleY}
                         draggable
                         dragBoundFunc={(pos) =>
                           clampOverlay(
                             pos,
-                            mapFocusDims.mw,
-                            mapFocusDims.mh,
+                            mapBaseW,
+                            mapBaseH,
                             CANVAS_W,
                             canvasH
                           )
@@ -1226,24 +1230,29 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                             map: { x: e.target.x(), y: e.target.y() },
                           }))
                         }
+                        onMouseDown={(e) => {
+                          e.cancelBubble = true;
+                          setSelectedOverlay("map");
+                        }}
+                        onTransformEnd={bindTransformEnd("map")}
                       >
                         <Rect
-                          width={mapFocusDims.mw}
-                          height={mapFocusDims.mh}
-                          cornerRadius={24}
+                          width={mapBaseW}
+                          height={mapBaseH}
+                          cornerRadius={22}
                           fill={THEME.glassFill}
                           stroke={THEME.glassStroke}
                           strokeWidth={1}
                           shadowColor="rgba(0,0,0,0.55)"
-                          shadowBlur={36}
-                          shadowOffsetY={14}
+                          shadowBlur={28}
+                          shadowOffsetY={12}
                           shadowOpacity={0.55}
                         />
                         <Text
                           x={MAP_PAD_X}
                           y={12}
                           text="ROUTE"
-                          fontSize={STAT_LABEL_PX}
+                          fontSize={effectiveLabelPx}
                           fontStyle="bold"
                           fontFamily="Inter, system-ui, sans-serif"
                           fill={THEME.muted}
@@ -1254,38 +1263,32 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                           y={MAP_HEADER_H}
                           clipFunc={(ctx) => {
                             ctx.beginPath();
-                            ctx.roundRect(
-                              0,
-                              0,
-                              mapFocusDims.routeW,
-                              mapFocusDims.routeH,
-                              14
-                            );
+                            ctx.roundRect(0, 0, routeW, routeH, 14);
                           }}
                         >
                           <Rect
                             x={0}
                             y={0}
-                            width={mapFocusDims.routeW}
-                            height={mapFocusDims.routeH}
+                            width={routeW}
+                            height={routeH}
                             fill="rgba(255,255,255,0.04)"
                           />
-                          {hasRouteFocus ? (
+                          {hasRoute ? (
                             <Line
-                              points={routePointsMapFocus}
+                              points={routePoints}
                               stroke={THEME.highlight}
-                              strokeWidth={5}
+                              strokeWidth={Math.max(3, Math.round(4 * canvasScale))}
                               lineCap="round"
                               lineJoin="round"
                               shadowColor="rgba(232,255,0,0.35)"
-                              shadowBlur={14}
+                              shadowBlur={12}
                               shadowOpacity={0.9}
                             />
                           ) : (
                             <Text
                               x={0}
-                              y={mapFocusDims.routeH / 2 - 10}
-                              width={mapFocusDims.routeW}
+                              y={routeH / 2 - 10}
+                              width={routeW}
                               align="center"
                               text="No GPS track"
                               fontSize={14}
@@ -1298,167 +1301,19 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                       </Group>
                     ) : null}
 
-                    {presetId === "mapFocus"
-                      ? (() => {
-                          const stats = STAT_ORDER.filter((k) => layers[k]);
-                          const rowH = 56;
-                          const colW = SIDE_COL_W - 40;
-                          return (
-                            <Group
-                              x={positions.sideColumn.x}
-                              y={positions.sideColumn.y}
-                              draggable
-                              dragBoundFunc={(pos) =>
-                                clampOverlay(
-                                  pos,
-                                  SIDE_COL_W,
-                                  stats.length * rowH + 40,
-                                  CANVAS_W,
-                                  canvasH
-                                )
-                              }
-                              onDragEnd={(e) =>
-                                setPositions((p) => ({
-                                  ...p,
-                                  sideColumn: {
-                                    x: e.target.x(),
-                                    y: e.target.y(),
-                                  },
-                                }))
-                              }
-                            >
-                              <Rect
-                                width={SIDE_COL_W}
-                                height={stats.length * rowH + 36}
-                                cornerRadius={20}
-                                fill={THEME.glassFill}
-                                stroke={THEME.glassStroke}
-                                strokeWidth={1}
-                                shadowColor="rgba(0,0,0,0.45)"
-                                shadowBlur={24}
-                                shadowOffsetY={8}
-                                shadowOpacity={0.5}
-                              />
-                              {stats.map((key, i) => (
-                                <Group key={key} x={20} y={18 + i * rowH}>
-                                  <StatIcon
-                                    kind={key}
-                                    x={0}
-                                    y={4}
-                                    strokeColor={THEME.accent}
-                                  />
-                                  <Text
-                                    x={34}
-                                    y={0}
-                                    width={colW}
-                                    text={key.toUpperCase()}
-                                    fontSize={STAT_LABEL_PX}
-                                    fontStyle="bold"
-                                    fontFamily="Inter, system-ui, sans-serif"
-                                    fill={THEME.muted}
-                                    letterSpacing={1}
-                                  />
-                                  <Text
-                                    x={34}
-                                    y={22}
-                                    width={colW}
-                                    text={statValues[key]}
-                                    fontSize={STAT_VALUE_PX}
-                                    fontStyle="bold"
-                                    fontFamily="Inter, system-ui, sans-serif"
-                                    fill={valueColor(key)}
-                                  />
-                                </Group>
-                              ))}
-                            </Group>
-                          );
-                        })()
-                      : null}
-
-                    {presetId === "storyMode" ? (
+                    {showStatStack ? (
                       <Group
-                        x={positions.storyStack.x}
-                        y={positions.storyStack.y}
-                        draggable
-                        dragBoundFunc={(pos) =>
-                          clampOverlay(pos, 400, storyPanelH, CANVAS_W, canvasH)
-                        }
-                        onDragEnd={(e) =>
-                          setPositions((p) => ({
-                            ...p,
-                            storyStack: {
-                              x: e.target.x(),
-                              y: e.target.y(),
-                            },
-                          }))
-                        }
-                      >
-                        <Rect
-                          width={400}
-                          height={storyPanelH}
-                          cornerRadius={24}
-                          fill={THEME.glassFill}
-                          stroke={THEME.glassStroke}
-                          strokeWidth={1}
-                          shadowColor="rgba(0,0,0,0.5)"
-                          shadowBlur={32}
-                          shadowOffsetY={12}
-                          shadowOpacity={0.55}
-                        />
-                        <Text
-                          x={28}
-                          y={24}
-                          width={344}
-                          text={titleText}
-                          fontSize={22}
-                          fontStyle="bold"
-                          fontFamily="Inter, system-ui, sans-serif"
-                          fill={THEME.accent}
-                        />
-                        {storyStats.map((key, i) => (
-                          <Group key={key} x={28} y={64 + i * 72}>
-                            <StatIcon
-                              kind={key}
-                              x={0}
-                              y={6}
-                              strokeColor={THEME.accent}
-                            />
-                            <Text
-                              x={40}
-                              y={0}
-                              width={300}
-                              text={key.replace(/([A-Z])/g, " $1").trim()}
-                              fontSize={STAT_LABEL_PX}
-                              fontStyle="bold"
-                              fontFamily="Inter, system-ui, sans-serif"
-                              fill={THEME.muted}
-                              letterSpacing={0.8}
-                            />
-                            <Text
-                              x={40}
-                              y={28}
-                              width={300}
-                              text={statValues[key]}
-                              fontSize={STAT_VALUE_PX}
-                              fontStyle="bold"
-                              fontFamily="Inter, system-ui, sans-serif"
-                              fill={valueColor(key)}
-                            />
-                          </Group>
-                        ))}
-                      </Group>
-                    ) : null}
-
-                    {presetId === "darkCard" ? (
-                      <Group
-                        x={positions.darkCard.x}
-                        y={positions.darkCard.y}
+                        ref={stackGroupRef}
+                        x={positions.stack.x}
+                        y={positions.stack.y}
+                        scaleX={overlayScales.stack.scaleX}
+                        scaleY={overlayScales.stack.scaleY}
                         draggable
                         dragBoundFunc={(pos) =>
                           clampOverlay(
                             pos,
-                            DARK_CARD_W,
-                            darkCardH,
+                            stackInnerW,
+                            Math.min(stackPanelH, stackMaxY - positions.stack.y),
                             CANVAS_W,
                             canvasH
                           )
@@ -1466,50 +1321,72 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                         onDragEnd={(e) =>
                           setPositions((p) => ({
                             ...p,
-                            darkCard: {
-                              x: e.target.x(),
-                              y: e.target.y(),
-                            },
+                            stack: { x: e.target.x(), y: e.target.y() },
                           }))
                         }
+                        onMouseDown={(e) => {
+                          e.cancelBubble = true;
+                          setSelectedOverlay("stack");
+                        }}
+                        onTransformEnd={bindTransformEnd("stack")}
                       >
                         <Rect
-                          width={DARK_CARD_W}
-                          height={darkCardH}
-                          cornerRadius={28}
-                          fill="rgba(12,12,14,0.88)"
+                          x={0}
+                          y={0}
+                          width={stackInnerW}
+                          height={Math.min(stackPanelH, stackMaxY - positions.stack.y)}
+                          cornerRadius={24}
+                          fill={stackGlassFill}
                           stroke={THEME.glassStroke}
                           strokeWidth={1}
-                          shadowColor="rgba(0,0,0,0.6)"
-                          shadowBlur={40}
-                          shadowOffsetY={16}
-                          shadowOpacity={0.6}
+                          shadowColor="rgba(0,0,0,0.5)"
+                          shadowBlur={32}
+                          shadowOffsetY={12}
+                          shadowOpacity={0.55}
                         />
-                        {STAT_ORDER.filter((k) => layers[k]).map((key, i) => {
-                          const cols = 3;
-                          const col = i % cols;
-                          const row = Math.floor(i / cols);
-                          const cellW = (DARK_CARD_W - 80) / cols;
-                          const cx = 40 + col * cellW;
-                          const cy = 40 + row * 110;
+                        {visibleStats.map((key, i) => {
+                          const rowY =
+                            stackPad + i * stackRowH + Math.round(4 * canvasScale);
+                          const lbl =
+                            CHIP_STATS.find((c) => c.key === key)?.label ??
+                            key.toUpperCase();
+                          const iconS = Math.min(
+                            1.35,
+                            effectiveValuePx / 26
+                          );
+                          const labelCol = Math.round(44 * canvasScale);
                           return (
-                            <Group key={key} x={cx} y={cy}>
-                              {statLabel(
-                                key === "avgSpeed"
-                                  ? "AVG SPD"
-                                  : key === "heartRate"
-                                    ? "HEART"
-                                    : key.toUpperCase(),
-                                0,
-                                0,
-                                cellW - 8
-                              )}
-                              <Text
+                            <Group key={key} x={stackPad} y={rowY}>
+                              <Group
                                 x={0}
-                                y={22}
-                                width={cellW - 8}
+                                y={Math.round(4 * canvasScale)}
+                                scaleX={iconS}
+                                scaleY={iconS}
+                              >
+                                <StatIcon
+                                  kind={key}
+                                  x={0}
+                                  y={0}
+                                  strokeColor={THEME.accent}
+                                />
+                              </Group>
+                              <Text
+                                x={labelCol}
+                                y={0}
+                                width={stackInnerW - stackPad * 2 - labelCol}
+                                text={lbl.toUpperCase()}
+                                fontSize={effectiveLabelPx}
+                                fontStyle="bold"
+                                fontFamily="Inter, system-ui, sans-serif"
+                                fill={THEME.muted}
+                                letterSpacing={2.2}
+                              />
+                              <Text
+                                x={labelCol}
+                                y={effectiveLabelPx + Math.round(8 * canvasScale)}
+                                width={stackInnerW - stackPad * 2 - labelCol}
                                 text={statValues[key]}
-                                fontSize={STAT_VALUE_PX}
+                                fontSize={effectiveValuePx}
                                 fontStyle="bold"
                                 fontFamily="Inter, system-ui, sans-serif"
                                 fill={valueColor(key)}
@@ -1520,91 +1397,55 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                       </Group>
                     ) : null}
 
-                    {showClassicMap ? (
+                    {showWatermark ? (
                       <Group
-                        x={positions.map.x}
-                        y={positions.map.y}
+                        ref={watermarkGroupRef}
+                        x={positions.watermark.x}
+                        y={positions.watermark.y}
+                        scaleX={overlayScales.watermark.scaleX}
+                        scaleY={overlayScales.watermark.scaleY}
                         draggable
                         dragBoundFunc={(pos) =>
-                          clampOverlay(
-                            pos,
-                            MAP_CARD_W,
-                            MAP_CARD_H,
-                            CANVAS_W,
-                            canvasH
-                          )
+                          clampOverlay(pos, 520, 64, CANVAS_W, canvasH)
                         }
                         onDragEnd={(e) =>
                           setPositions((p) => ({
                             ...p,
-                            map: { x: e.target.x(), y: e.target.y() },
+                            watermark: { x: e.target.x(), y: e.target.y() },
                           }))
                         }
+                        onMouseDown={(e) => {
+                          e.cancelBubble = true;
+                          setSelectedOverlay("watermark");
+                        }}
+                        onTransformEnd={bindTransformEnd("watermark")}
                       >
-                        <Rect
-                          width={MAP_CARD_W}
-                          height={MAP_CARD_H}
-                          cornerRadius={20}
-                          fill={THEME.glassFill}
-                          stroke={THEME.glassStroke}
-                          strokeWidth={1}
-                          shadowColor="rgba(0,0,0,0.55)"
-                          shadowBlur={28}
-                          shadowOffsetY={10}
-                          shadowOpacity={0.55}
-                        />
                         <Text
-                          x={MAP_PAD_X}
-                          y={12}
-                          text="ROUTE"
-                          fontSize={STAT_LABEL_PX}
-                          fontStyle="bold"
+                          text={WATERMARK_DISPLAY}
+                          fontSize={watermarkFontPx}
+                          fontStyle="normal"
                           fontFamily="Inter, system-ui, sans-serif"
-                          fill={THEME.muted}
-                          letterSpacing={2}
+                          fill="rgba(255,255,255,0.42)"
+                          lineHeight={1.35}
                         />
-                        <Group
-                          x={MAP_PAD_X}
-                          y={MAP_HEADER_H}
-                          clipFunc={(ctx) => {
-                            ctx.beginPath();
-                            ctx.roundRect(0, 0, ROUTE_BASE_W, ROUTE_BASE_H, 12);
-                          }}
-                        >
-                          <Rect
-                            x={0}
-                            y={0}
-                            width={ROUTE_BASE_W}
-                            height={ROUTE_BASE_H}
-                            fill="rgba(255,255,255,0.04)"
-                          />
-                          {hasRouteDefault ? (
-                            <Line
-                              points={routePointsDefault}
-                              stroke={THEME.highlight}
-                              strokeWidth={4}
-                              lineCap="round"
-                              lineJoin="round"
-                              shadowColor="rgba(232,255,0,0.35)"
-                              shadowBlur={12}
-                              shadowOpacity={0.9}
-                            />
-                          ) : (
-                            <Text
-                              x={0}
-                              y={ROUTE_BASE_H / 2 - 12}
-                              width={ROUTE_BASE_W}
-                              align="center"
-                              text="No GPS track"
-                              fontSize={14}
-                              fontStyle="bold"
-                              fontFamily="Inter, system-ui, sans-serif"
-                              fill={THEME.muted}
-                            />
-                          )}
-                        </Group>
                       </Group>
                     ) : null}
+
+                    <Transformer
+                      ref={transformerRef}
+                      rotateEnabled={false}
+                      flipEnabled={false}
+                      borderStroke="#E8FF00"
+                      anchorFill="#0A0A0A"
+                      anchorStroke="#E8FF00"
+                      anchorSize={11}
+                      padding={8}
+                      boundBoxFunc={(oldBox, newBox) => {
+                        if (newBox.width < 36 || newBox.height < 22)
+                          return oldBox;
+                        return newBox;
+                      }}
+                    />
                   </Layer>
                 </Stage>
               </div>
@@ -1651,12 +1492,14 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
               </button>
             </div>
             <div className="max-h-[calc(85dvh-3.5rem)] space-y-4 overflow-y-auto p-4">
-              <LayersPanel
+              <EditorSidebarPanel
                 layers={layers}
                 toggle={toggle}
                 setAllStats={setAllStats}
-                checkClass={checkClass}
-                labelClass={labelClass}
+                statValuePx={statValuePx}
+                setStatValuePx={setStatValuePx}
+                showWatermark={showWatermark}
+                setShowWatermark={setShowWatermark}
               />
             </div>
           </div>

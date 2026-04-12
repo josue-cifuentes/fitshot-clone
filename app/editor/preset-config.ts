@@ -13,23 +13,23 @@ export const PRESET_META: Record<
 > = {
   minimal: {
     label: "Minimal",
-    description: "Bottom bar — distance & time only",
+    description: "Header optional · distance & time in bottom stack",
   },
   full: {
     label: "Full stats",
-    description: "Title, all stats, route map",
+    description: "Header, map, all stats in bottom stack",
   },
   mapFocus: {
     label: "Map focus",
-    description: "Large route + side stats",
+    description: "Larger route card · stats below",
   },
   storyMode: {
     label: "Story mode",
-    description: "Vertical stack for stories",
+    description: "9:16 defaults · full stack",
   },
   darkCard: {
     label: "Dark card",
-    description: "Centered stat grid",
+    description: "Darker bottom glass panel",
   },
 };
 
@@ -41,24 +41,26 @@ export const PRESET_ORDER: PresetId[] = [
   "darkCard",
 ];
 
-export function layersForPreset(id: PresetId): LayerToggles {
-  const allStats: Pick<
-    LayerToggles,
-    | "distance"
-    | "duration"
-    | "avgSpeed"
-    | "heartRate"
-    | "elevation"
-    | "calories"
-  > = {
-    distance: true,
-    duration: true,
-    avgSpeed: true,
-    heartRate: true,
-    elevation: true,
-    calories: true,
-  };
+const allStats: Pick<
+  LayerToggles,
+  | "distance"
+  | "duration"
+  | "avgSpeed"
+  | "maxSpeed"
+  | "heartRate"
+  | "elevation"
+  | "calories"
+> = {
+  distance: true,
+  duration: true,
+  avgSpeed: true,
+  maxSpeed: true,
+  heartRate: true,
+  elevation: true,
+  calories: true,
+};
 
+export function layersForPreset(id: PresetId): LayerToggles {
   switch (id) {
     case "minimal":
       return {
@@ -68,6 +70,7 @@ export function layersForPreset(id: PresetId): LayerToggles {
         distance: true,
         duration: true,
         avgSpeed: false,
+        maxSpeed: false,
         heartRate: false,
         elevation: false,
         calories: false,
@@ -81,23 +84,23 @@ export function layersForPreset(id: PresetId): LayerToggles {
       };
     case "mapFocus":
       return {
-        topBar: false,
-        bottomBar: false,
+        topBar: true,
+        bottomBar: true,
         map: true,
         ...allStats,
       };
     case "storyMode":
       return {
-        topBar: false,
-        bottomBar: false,
-        map: false,
+        topBar: true,
+        bottomBar: true,
+        map: true,
         ...allStats,
       };
     case "darkCard":
       return {
-        topBar: false,
-        bottomBar: false,
-        map: false,
+        topBar: true,
+        bottomBar: true,
+        map: true,
         ...allStats,
       };
     default:
@@ -110,8 +113,11 @@ export function layersForPreset(id: PresetId): LayerToggles {
   }
 }
 
-/** Story preset forces tall canvas; others respect current feed/story toggle unless null */
 export function preferredExportForPreset(id: PresetId): "feed" | "story" | null {
   if (id === "storyMode") return "story";
   return null;
+}
+
+export function mapScaleForPreset(id: PresetId): number {
+  return id === "mapFocus" ? 1.22 : 1;
 }
