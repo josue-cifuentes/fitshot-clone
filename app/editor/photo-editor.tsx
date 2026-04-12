@@ -70,9 +70,6 @@ const TOP_H = 168;
 const MAP_CARD_W = 302;
 const MAP_CARD_H = 218;
 const MAP_PAD_X = 16;
-const MAP_HEADER_H = 34;
-const ROUTE_BASE_W = MAP_CARD_W - MAP_PAD_X * 2;
-const ROUTE_BASE_H = MAP_CARD_H - MAP_HEADER_H - MAP_PAD_X - 10;
 
 const STAT_ORDER: StatKey[] = [
   "distance",
@@ -571,7 +568,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const mapBaseW = MAP_CARD_W * mapScaleForPreset(presetId);
   const mapBaseH = MAP_CARD_H * mapScaleForPreset(presetId);
   const routeW = mapBaseW - MAP_PAD_X * 2;
-  const routeH = mapBaseH - MAP_HEADER_H - MAP_PAD_X - 10;
+  const routeH = mapBaseH - MAP_PAD_X * 2;
 
   const routePoints = useMemo(() => {
     const encoded = selected?.map?.summary_polyline;
@@ -1213,19 +1210,9 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                           shadowOffsetY={12}
                           shadowOpacity={0.55}
                         />
-                        <Text
-                          x={MAP_PAD_X}
-                          y={12}
-                          text="ROUTE"
-                          fontSize={effectiveLabelPx}
-                          fontStyle="bold"
-                          fontFamily="Inter, system-ui, sans-serif"
-                          fill={THEME.muted}
-                          letterSpacing={2}
-                        />
                         <Group
                           x={MAP_PAD_X}
-                          y={MAP_HEADER_H}
+                          y={MAP_PAD_X}
                           clipFunc={(ctx) => {
                             ctx.beginPath();
                             ctx.roundRect(0, 0, routeW, routeH, 14);
@@ -1249,19 +1236,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                               shadowBlur={12}
                               shadowOpacity={0.9}
                             />
-                          ) : (
-                            <Text
-                              x={0}
-                              y={routeH / 2 - 10}
-                              width={routeW}
-                              align="center"
-                              text="No GPS track"
-                              fontSize={14}
-                              fontStyle="bold"
-                              fontFamily="Inter, system-ui, sans-serif"
-                              fill={THEME.muted}
-                            />
-                          )}
+                          ) : null}
                         </Group>
                       </Group>
                     ) : null}
@@ -1382,13 +1357,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
               </div>
             </div>
           </div>
-
-          <p className="shrink-0 text-center text-[11px] font-medium text-[#F5F5F5]/40 sm:text-xs">
-            Route from Strava <code className="font-mono text-[#E8FF00]/80">summary_polyline</code> ·{" "}
-            <span className="font-mono">
-              {appUrl ? new URL(appUrl).hostname : "unset"}
-            </span>
-          </p>
         </div>
       </div>
 
