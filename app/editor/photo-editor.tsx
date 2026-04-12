@@ -39,9 +39,9 @@ import {
 import type { LayerToggles, StatKey } from "./layer-types";
 import { LayoutPicker } from "./layout-picker";
 import {
+  exportFormatForPreset,
   layersForPreset,
   mapScaleForPreset,
-  preferredExportForPreset,
   type PresetId,
 } from "./preset-config";
 
@@ -113,14 +113,64 @@ function initialPositions(preset: PresetId, canvasH: number): EditorPositions {
   const cScale = canvasH / STORY_BASE_H;
   const mapScale = mapScaleForPreset(preset);
   const mw = MAP_CARD_W * mapScale;
-  return {
-    header: { x: Math.round(28 * cScale), y: Math.round(NOTCH_PAD_STORY * cScale) },
-    map: {
-      x: CANVAS_W - mw - Math.round(28 * cScale),
-      y: Math.round(88 * cScale),
-    },
-    stack: { x: Math.round(32 * cScale), y: canvasH * 0.75 },
+  const mh = MAP_CARD_H * mapScale;
+
+  const headerBase = {
+    x: Math.round(28 * cScale),
+    y: Math.round(NOTCH_PAD_STORY * cScale),
   };
+  const mapTopRight = {
+    x: CANVAS_W - mw - Math.round(28 * cScale),
+    y: Math.round(88 * cScale),
+  };
+  const stackDefault = {
+    x: Math.round(32 * cScale),
+    y: canvasH * 0.75,
+  };
+
+  switch (preset) {
+    case "minimal":
+      return {
+        header: headerBase,
+        map: mapTopRight,
+        stack: {
+          x: Math.round(32 * cScale),
+          y: canvasH * 0.82,
+        },
+      };
+    case "mapFocus":
+      return {
+        header: {
+          x: Math.round(28 * cScale),
+          y: Math.round((NOTCH_PAD_STORY - 8) * cScale),
+        },
+        map: {
+          x: Math.round(20 * cScale),
+          y: Math.round(canvasH * 0.2),
+        },
+        stack: {
+          x: Math.round(32 * cScale),
+          y: Math.min(canvasH * 0.68, canvasH - mh - Math.round(48 * cScale)),
+        },
+      };
+    case "darkCard":
+      return {
+        header: headerBase,
+        map: mapTopRight,
+        stack: {
+          x: Math.round(28 * cScale),
+          y: canvasH * 0.72,
+        },
+      };
+    case "storyMode":
+    case "full":
+    default:
+      return {
+        header: headerBase,
+        map: mapTopRight,
+        stack: stackDefault,
+      };
+  }
 }
 
 function initialOverlayScales(): Record<OverlayId, OverlayScale> {
@@ -473,36 +523,36 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
     initialPositions("full", STORY_H)
   );
 
-  const applyPreset = useCallback((id: PresetId, canvasHeight: number) => {
+  const applyPreset = useCallback((id: PresetId) => {
+    const format = exportFormatForPreset(id);
+    const h = format === "story" ? STORY_H : FEED_H;
     setPresetId(id);
+    setExportFormat(format);
     setLayers(layersForPreset(id));
     setOverlayScales(initialOverlayScales());
     setSelectedOverlay(null);
-    const pref = preferredExportForPreset(id);
-    if (pref === "story") {
-      setExportFormat("story");
-      setPositions(initialPositions(id, STORY_H));
-    } else {
-      setPositions(initialPositions(id, canvasHeight));
-    }
+    setPositions(initialPositions(id, h));
   }, []);
+
+  const presetSwitchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   const handleSelectPreset = useCallback(
     (id: PresetId) => {
       if (id === presetId) return;
+      if (presetSwitchTimerRef.current !== null) {
+        clearTimeout(presetSwitchTimerRef.current);
+        presetSwitchTimerRef.current = null;
+      }
       setLayoutTransition(true);
-      window.setTimeout(() => {
-        const h =
-          preferredExportForPreset(id) === "story"
-            ? STORY_H
-            : exportFormat === "story"
-              ? STORY_H
-              : FEED_H;
-        applyPreset(id, h);
-        window.requestAnimationFrame(() => setLayoutTransition(false));
-      }, 220);
+      applyPreset(id);
+      presetSwitchTimerRef.current = setTimeout(() => {
+        presetSwitchTimerRef.current = null;
+        setLayoutTransition(false);
+      }, 120);
     },
-    [applyPreset, exportFormat, presetId]
+    [applyPreset, presetId]
   );
 
   const setExportFormatAndReset = useCallback(
@@ -515,6 +565,14 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
     },
     [presetId]
   );
+
+  useEffect(() => {
+    return () => {
+      if (presetSwitchTimerRef.current !== null) {
+        clearTimeout(presetSwitchTimerRef.current);
+      }
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const el = canvasHostRef.current;

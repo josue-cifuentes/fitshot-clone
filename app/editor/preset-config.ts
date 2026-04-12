@@ -113,9 +113,9 @@ export function layersForPreset(id: PresetId): LayerToggles {
   }
 }
 
-export function preferredExportForPreset(id: PresetId): "feed" | "story" | null {
-  if (id === "storyMode") return "story";
-  return null;
+/** Story Mode → 9:16; all other presets → 1:1 feed. */
+export function exportFormatForPreset(id: PresetId): "feed" | "story" {
+  return id === "storyMode" ? "story" : "feed";
 }
 
 export function mapScaleForPreset(id: PresetId): number {
