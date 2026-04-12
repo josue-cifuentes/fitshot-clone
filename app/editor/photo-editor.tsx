@@ -64,7 +64,6 @@ const DEFAULT_STAT_LABEL_STORY = 13;
 const TITLE_STORY_PX = 28;
 const DATE_STORY_PX = 16;
 const NOTCH_PAD_STORY = 72;
-const WATERMARK_DISPLAY = "Made with FitShot\nby Josue Cifuentes";
 
 const TOP_W = CANVAS_W - 56;
 const TOP_H = 168;
@@ -103,13 +102,12 @@ const STAT_ICONS: Record<StatKey, { d: string; fill?: string }> = {
 
 type ExportFormat = "feed" | "story";
 
-type OverlayId = "header" | "map" | "stack" | "watermark";
+type OverlayId = "header" | "map" | "stack";
 
 type EditorPositions = {
   header: { x: number; y: number };
   map: { x: number; y: number };
   stack: { x: number; y: number };
-  watermark: { x: number; y: number };
 };
 
 type OverlayScale = { scaleX: number; scaleY: number };
@@ -125,10 +123,6 @@ function initialPositions(preset: PresetId, canvasH: number): EditorPositions {
       y: Math.round(88 * cScale),
     },
     stack: { x: Math.round(32 * cScale), y: canvasH * 0.75 },
-    watermark: {
-      x: Math.round(28 * cScale),
-      y: canvasH - Math.round(96 * cScale),
-    },
   };
 }
 
@@ -137,7 +131,6 @@ function initialOverlayScales(): Record<OverlayId, OverlayScale> {
     header: { scaleX: 1, scaleY: 1 },
     map: { scaleX: 1, scaleY: 1 },
     stack: { scaleX: 1, scaleY: 1 },
-    watermark: { scaleX: 1, scaleY: 1 },
   };
 }
 
@@ -342,16 +335,12 @@ function EditorSidebarPanel({
   setAllStats,
   statValuePx,
   setStatValuePx,
-  showWatermark,
-  setShowWatermark,
 }: {
   layers: LayerToggles;
   toggle: (key: keyof LayerToggles) => void;
   setAllStats: (on: boolean) => void;
   statValuePx: number;
   setStatValuePx: (n: number) => void;
-  showWatermark: boolean;
-  setShowWatermark: (v: boolean) => void;
 }) {
   return (
     <>
@@ -363,18 +352,6 @@ function EditorSidebarPanel({
           Tap chips to show or hide. Tap canvas groups to resize with handles.
         </p>
       </div>
-
-      <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[#F5F5F5]/12 bg-[#F5F5F5]/[0.04] px-3 py-2.5">
-        <input
-          type="checkbox"
-          className="h-4 w-4 accent-[#E8FF00]"
-          checked={showWatermark}
-          onChange={(e) => setShowWatermark(e.target.checked)}
-        />
-        <span className="text-sm font-semibold text-[#F5F5F5]">
-          “Powered by” watermark
-        </span>
-      </label>
 
       <div>
         <label className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wider text-[#F5F5F5]/45">
@@ -457,7 +434,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const headerGroupRef = useRef<KonvaGroup | null>(null);
   const mapGroupRef = useRef<KonvaGroup | null>(null);
   const stackGroupRef = useRef<KonvaGroup | null>(null);
-  const watermarkGroupRef = useRef<KonvaGroup | null>(null);
   const pinchStart = useRef<{
     dist: number;
     scaleX: number;
@@ -491,7 +467,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const [viewScale, setViewScale] = useState(0.35);
 
   const [statValuePx, setStatValuePx] = useState(DEFAULT_STAT_VALUE_STORY);
-  const [showWatermark, setShowWatermark] = useState(true);
   const [selectedOverlay, setSelectedOverlay] = useState<OverlayId | null>(null);
   const [overlayScales, setOverlayScales] = useState<Record<OverlayId, OverlayScale>>(
     () => initialOverlayScales()
@@ -592,7 +567,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   );
   const titlePx = Math.max(14, Math.round(TITLE_STORY_PX * canvasScale));
   const datePx = Math.max(10, Math.round(DATE_STORY_PX * canvasScale));
-  const watermarkFontPx = Math.max(8, Math.round(10 * canvasScale));
 
   const mapBaseW = MAP_CARD_W * mapScaleForPreset(presetId);
   const mapBaseH = MAP_CARD_H * mapScaleForPreset(presetId);
@@ -642,19 +616,12 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const stackMaxY = canvasH - Math.round(120 * canvasScale);
 
   useEffect(() => {
-    if (!showWatermark && selectedOverlay === "watermark") {
-      setSelectedOverlay(null);
-    }
-  }, [showWatermark, selectedOverlay]);
-
-  useEffect(() => {
     const tr = transformerRef.current;
     if (!tr) return;
     const map: Record<OverlayId, KonvaGroup | null> = {
       header: headerGroupRef.current,
       map: mapGroupRef.current,
       stack: stackGroupRef.current,
-      watermark: watermarkGroupRef.current,
     };
     const node = selectedOverlay ? map[selectedOverlay] : null;
     if (node) {
@@ -664,7 +631,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
       tr.nodes([]);
     }
     tr.getLayer()?.batchDraw();
-  }, [selectedOverlay, showStatStack, showWatermark, canvasH]);
+  }, [selectedOverlay, showStatStack, canvasH]);
 
   const onPickMedia = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -935,8 +902,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
             setAllStats={setAllStats}
             statValuePx={statValuePx}
             setStatValuePx={setStatValuePx}
-            showWatermark={showWatermark}
-            setShowWatermark={setShowWatermark}
           />
         </aside>
 
@@ -1397,40 +1362,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                       </Group>
                     ) : null}
 
-                    {showWatermark ? (
-                      <Group
-                        ref={watermarkGroupRef}
-                        x={positions.watermark.x}
-                        y={positions.watermark.y}
-                        scaleX={overlayScales.watermark.scaleX}
-                        scaleY={overlayScales.watermark.scaleY}
-                        draggable
-                        dragBoundFunc={(pos) =>
-                          clampOverlay(pos, 520, 64, CANVAS_W, canvasH)
-                        }
-                        onDragEnd={(e) =>
-                          setPositions((p) => ({
-                            ...p,
-                            watermark: { x: e.target.x(), y: e.target.y() },
-                          }))
-                        }
-                        onMouseDown={(e) => {
-                          e.cancelBubble = true;
-                          setSelectedOverlay("watermark");
-                        }}
-                        onTransformEnd={bindTransformEnd("watermark")}
-                      >
-                        <Text
-                          text={WATERMARK_DISPLAY}
-                          fontSize={watermarkFontPx}
-                          fontStyle="normal"
-                          fontFamily="Inter, system-ui, sans-serif"
-                          fill="rgba(255,255,255,0.42)"
-                          lineHeight={1.35}
-                        />
-                      </Group>
-                    ) : null}
-
                     <Transformer
                       ref={transformerRef}
                       rotateEnabled={false}
@@ -1498,8 +1429,6 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                 setAllStats={setAllStats}
                 statValuePx={statValuePx}
                 setStatValuePx={setStatValuePx}
-                showWatermark={showWatermark}
-                setShowWatermark={setShowWatermark}
               />
             </div>
           </div>
