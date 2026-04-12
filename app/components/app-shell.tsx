@@ -16,14 +16,19 @@ const nav = [
   { href: "/editor", label: "Editor", Icon: IconEditor },
 ] as const;
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  footer,
+}: {
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
   const pathname = usePathname();
 
   return (
-    <div className="flex min-h-[100dvh] flex-1 flex-col bg-[#0A0A0A]">
-      <main className="flex min-h-0 flex-1 flex-col pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))]">
-        {children}
-      </main>
+    <div className="flex min-h-[100dvh] flex-1 flex-col bg-[#0A0A0A] pb-[calc(4.5rem+env(safe-area-inset-bottom,0px))]">
+      <main className="flex min-h-0 flex-1 flex-col">{children}</main>
+      {footer}
 
       <nav
         className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#F5F5F5]/10 bg-[#0A0A0A]/80 backdrop-blur-xl"
