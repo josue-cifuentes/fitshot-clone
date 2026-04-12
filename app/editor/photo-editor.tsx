@@ -2,6 +2,7 @@
 
 import type { Image as KonvaImageShape } from "konva/lib/shapes/Image";
 import type { Stage as KonvaStage } from "konva/lib/Stage";
+import Konva from "konva";
 import Link from "next/link";
 import {
   useCallback,
@@ -37,6 +38,16 @@ import {
   type StravaActivity,
 } from "@/lib/strava";
 import type { LayerToggles, StatKey } from "./layer-types";
+import {
+  type ActiveEffectPreset,
+  applyKonvaEffectAttrs,
+  buildKonvaFilters,
+  cloneEffects,
+  DEFAULT_EFFECT_VALUES,
+  effectsNeedKonvaProcessing,
+  type EffectValues,
+} from "./editor-effects";
+import { EffectsPanel } from "./effects-panel";
 import { LayoutPicker } from "./layout-picker";
 import {
   exportFormatForPreset,
@@ -192,6 +203,20 @@ function coverLayout(
   const h = imgH * s;
   return { x: (boxW - w) / 2, y: (boxH - h) / 2, width: w, height: h };
 }
+
+function twoTouchDistance(touches: TouchList): number | null {
+  if (touches.length < 2) return null;
+  const a = touches[0];
+  const b = touches[1];
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+}
+
+type PinchSession = {
+  initialDist: number;
+  initialScaleX: number;
+  initialScaleY: number;
+  overlayId: OverlayId;
+};
 
 function clampOverlay(
   pos: { x: number; y: number },
@@ -400,7 +425,7 @@ function EditorSidebarPanel({
         </p>
       </div>
 
-      <div>
+      <div className="min-h-[44px]">
         <label className="mb-1.5 block text-[11px] font-extrabold uppercase tracking-wider text-[#F5F5F5]/45">
           Stat value size ({statValuePx}px)
         </label>
@@ -410,7 +435,7 @@ function EditorSidebarPanel({
           max={48}
           value={statValuePx}
           onChange={(e) => setStatValuePx(Number(e.target.value))}
-          className="w-full accent-[#E8FF00]"
+          className="editor-range-touch"
         />
       </div>
 
@@ -481,11 +506,12 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const headerGroupRef = useRef<KonvaGroup | null>(null);
   const mapGroupRef = useRef<KonvaGroup | null>(null);
   const stackGroupRef = useRef<KonvaGroup | null>(null);
-  const pinchStart = useRef<{
-    dist: number;
-    scaleX: number;
-    scaleY: number;
-  } | null>(null);
+  const pinchStateRef = useRef<PinchSession | null>(null);
+  const selectedOverlayRef = useRef<OverlayId | null>(null);
+  const overlayScalesRef = useRef<Record<OverlayId, OverlayScale>>(
+    initialOverlayScales()
+  );
+  const effectsRef = useRef<EffectValues>(cloneEffects(DEFAULT_EFFECT_VALUES));
 
   const [presetId, setPresetId] = useState<PresetId>("full");
   const [layoutTransition, setLayoutTransition] = useState(false);
@@ -511,6 +537,11 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
     activities[0] ? String(activities[0].id) : ""
   );
   const [layersOpen, setLayersOpen] = useState(false);
+  const [effects, setEffects] = useState<EffectValues>(() =>
+    cloneEffects(DEFAULT_EFFECT_VALUES)
+  );
+  const [activeEffectPreset, setActiveEffectPreset] =
+    useState<ActiveEffectPreset>("original");
   const [viewScale, setViewScale] = useState(0.35);
 
   const [statValuePx, setStatValuePx] = useState(DEFAULT_STAT_VALUE_STORY);
@@ -518,10 +549,56 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   const [overlayScales, setOverlayScales] = useState<Record<OverlayId, OverlayScale>>(
     () => initialOverlayScales()
   );
-
+  const [coarsePointer, setCoarsePointer] = useState(false);
   const [positions, setPositions] = useState<EditorPositions>(() =>
     initialPositions("full", STORY_H)
   );
+
+  useEffect(() => {
+    selectedOverlayRef.current = selectedOverlay;
+  }, [selectedOverlay]);
+
+  useEffect(() => {
+    overlayScalesRef.current = overlayScales;
+  }, [overlayScales]);
+
+  useEffect(() => {
+    effectsRef.current = effects;
+  }, [effects]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setCoarsePointer(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  useLayoutEffect(() => {
+    const preventScrollWhileDrawing = (e: TouchEvent) => {
+      if (e.touches.length > 0 && e.cancelable) e.preventDefault();
+    };
+    let el: HTMLDivElement | null = null;
+    let raf = 0;
+    const attach = () => {
+      const stage = stageRef.current;
+      if (!stage) {
+        raf = requestAnimationFrame(attach);
+        return;
+      }
+      el = stage.getContent();
+      el.addEventListener("touchmove", preventScrollWhileDrawing, {
+        passive: false,
+      });
+    };
+    attach();
+    return () => {
+      cancelAnimationFrame(raf);
+      if (el)
+        el.removeEventListener("touchmove", preventScrollWhileDrawing);
+    };
+  }, [canvasH]);
 
   const applyPreset = useCallback((id: PresetId) => {
     const format = exportFormatForPreset(id);
@@ -597,7 +674,22 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
     if (!videoEl || !videoPlaying) return;
     let raf = 0;
     const loop = () => {
-      mediaKonvaRef.current?.getLayer()?.batchDraw();
+      const n = mediaKonvaRef.current;
+      const ev = effectsRef.current;
+      if (n && effectsNeedKonvaProcessing(ev)) {
+        const box = mediaCoverRef.current;
+        n.filters(buildKonvaFilters(ev));
+        applyKonvaEffectAttrs(n, ev);
+        n.clearCache();
+        n.cache({
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          height: box.height,
+          pixelRatio: 1,
+        });
+      }
+      n?.getLayer()?.batchDraw();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -931,6 +1023,41 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
   }, [photo, videoEl, videoIntrinsic, canvasH]);
 
   const mediaSource = photo ?? videoEl ?? undefined;
+  const mediaPreviewUrl = photo?.src ?? videoEl?.src ?? null;
+
+  const mediaCoverRef = useRef(mediaCover);
+  useEffect(() => {
+    mediaCoverRef.current = mediaCover;
+  }, [mediaCover]);
+
+  useLayoutEffect(() => {
+    const node = mediaKonvaRef.current;
+    if (!node || !mediaSource) return;
+    if (!effectsNeedKonvaProcessing(effects)) {
+      node.filters([]);
+      node.clearCache();
+      node.getLayer()?.batchDraw();
+      return;
+    }
+    node.filters(buildKonvaFilters(effects));
+    applyKonvaEffectAttrs(node, effects);
+    const { x, y, width, height } = mediaCover;
+    if (videoEl && videoPlaying) {
+      return;
+    }
+    node.clearCache();
+    node.cache({
+      x,
+      y,
+      width,
+      height,
+      pixelRatio: Math.min(
+        2,
+        typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1
+      ),
+    });
+    node.getLayer()?.batchDraw();
+  }, [mediaSource, mediaCover, effects, videoEl, videoPlaying]);
 
   const stackGlassFill =
     presetId === "darkCard"
@@ -946,6 +1073,63 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
       }));
     };
   }, []);
+
+  const handleStagePointerDown = useCallback(
+    (e: KonvaEventObject<PointerEvent>) => {
+      const st = e.target.getStage();
+      if (st && e.target === st) setSelectedOverlay(null);
+    },
+    []
+  );
+
+  const handleStageTouchStart = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      if (e.evt.touches.length !== 2) return;
+      const id = selectedOverlayRef.current;
+      if (!id) return;
+      const dist = twoTouchDistance(e.evt.touches);
+      if (dist === null || dist < 8) return;
+      const s = overlayScalesRef.current[id];
+      pinchStateRef.current = {
+        initialDist: dist,
+        initialScaleX: s.scaleX,
+        initialScaleY: s.scaleY,
+        overlayId: id,
+      };
+      if (e.evt.cancelable) e.evt.preventDefault();
+    },
+    []
+  );
+
+  const handleStageTouchMove = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      const pinch = pinchStateRef.current;
+      if (!pinch || e.evt.touches.length < 2) return;
+      const dist = twoTouchDistance(e.evt.touches);
+      if (dist === null || dist < 2) return;
+      const ratio = dist / pinch.initialDist;
+      const minS = 0.35;
+      const maxS = 4;
+      const nx = Math.min(maxS, Math.max(minS, pinch.initialScaleX * ratio));
+      const ny = Math.min(maxS, Math.max(minS, pinch.initialScaleY * ratio));
+      setOverlayScales((p) => ({
+        ...p,
+        [pinch.overlayId]: { scaleX: nx, scaleY: ny },
+      }));
+      if (e.evt.cancelable) e.evt.preventDefault();
+    },
+    []
+  );
+
+  const handleStageTouchEnd = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      if (e.evt.touches.length < 2) pinchStateRef.current = null;
+    },
+    []
+  );
+
+  const transformerAnchorSize = coarsePointer ? 26 : 11;
+  const transformerPadding = coarsePointer ? 10 : 8;
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col gap-3 font-[family-name:var(--font-inter)] sm:gap-4 lg:max-w-6xl">
@@ -966,6 +1150,17 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
             onChange={handleSelectPreset}
             transitioning={layoutTransition}
           />
+
+          <div className="glass-panel shrink-0 rounded-2xl p-3 sm:p-4">
+            <EffectsPanel
+              effects={effects}
+              onEffectsChange={setEffects}
+              activePreset={activeEffectPreset}
+              onPresetChange={setActiveEffectPreset}
+              previewUrl={mediaPreviewUrl}
+              isVideo={Boolean(videoEl)}
+            />
+          </div>
 
           <div className="shrink-0 space-y-2 sm:space-y-3">
             <div className="flex flex-wrap items-stretch gap-2 sm:items-center sm:gap-3">
@@ -1123,21 +1318,24 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
               }}
             >
               <div
+                className="touch-none"
                 style={{
                   width: CANVAS_W,
                   height: canvasH,
                   transform: `scale(${viewScale})`,
                   transformOrigin: "top left",
+                  touchAction: "none",
                 }}
               >
                 <Stage
                   width={CANVAS_W}
                   height={canvasH}
                   ref={stageRef}
-                  onMouseDown={(e) => {
-                    const st = e.target.getStage();
-                    if (st && e.target === st) setSelectedOverlay(null);
-                  }}
+                  onPointerDown={handleStagePointerDown}
+                  onTouchStart={handleStageTouchStart}
+                  onTouchMove={handleStageTouchMove}
+                  onTouchEnd={handleStageTouchEnd}
+                  onTouchCancel={handleStageTouchEnd}
                 >
                   <Layer>
                     {mediaSource ? (
@@ -1147,7 +1345,37 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                         listening={false}
                         {...mediaCover}
                       />
-                    ) : (
+                    ) : null}
+                    {mediaSource && effects.vignette > 0.001 ? (
+                      <Rect
+                        x={0}
+                        y={0}
+                        width={CANVAS_W}
+                        height={canvasH}
+                        listening={false}
+                        fillRadialGradientStartPoint={{
+                          x: CANVAS_W / 2,
+                          y: canvasH / 2,
+                        }}
+                        fillRadialGradientStartRadius={0}
+                        fillRadialGradientEndPoint={{
+                          x: CANVAS_W / 2,
+                          y: canvasH / 2,
+                        }}
+                        fillRadialGradientEndRadius={
+                          Math.max(CANVAS_W, canvasH) * 0.58
+                        }
+                        fillRadialGradientColorStops={[
+                          0,
+                          "rgba(0,0,0,0)",
+                          0.52,
+                          `rgba(0,0,0,${effects.vignette * 0.12})`,
+                          1,
+                          `rgba(0,0,0,${effects.vignette * 0.72})`,
+                        ]}
+                      />
+                    ) : null}
+                    {!mediaSource ? (
                       <Rect
                         x={0}
                         y={0}
@@ -1161,8 +1389,9 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                           1,
                           THEME.bg,
                         ]}
+                        onPointerDown={() => setSelectedOverlay(null)}
                       />
-                    )}
+                    ) : null}
 
                     {layers.topBar ? (
                       <Group
@@ -1181,7 +1410,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                             header: { x: e.target.x(), y: e.target.y() },
                           }))
                         }
-                        onMouseDown={(e) => {
+                        onPointerDown={(e) => {
                           e.cancelBubble = true;
                           setSelectedOverlay("header");
                         }}
@@ -1250,7 +1479,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                             map: { x: e.target.x(), y: e.target.y() },
                           }))
                         }
-                        onMouseDown={(e) => {
+                        onPointerDown={(e) => {
                           e.cancelBubble = true;
                           setSelectedOverlay("map");
                         }}
@@ -1322,7 +1551,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                             stack: { x: e.target.x(), y: e.target.y() },
                           }))
                         }
-                        onMouseDown={(e) => {
+                        onPointerDown={(e) => {
                           e.cancelBubble = true;
                           setSelectedOverlay("stack");
                         }}
@@ -1402,8 +1631,8 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
                       borderStroke="#E8FF00"
                       anchorFill="#0A0A0A"
                       anchorStroke="#E8FF00"
-                      anchorSize={11}
-                      padding={8}
+                      anchorSize={transformerAnchorSize}
+                      padding={transformerPadding}
                       boundBoxFunc={(oldBox, newBox) => {
                         if (newBox.width < 36 || newBox.height < 22)
                           return oldBox;
