@@ -22,7 +22,7 @@ export async function generateTrainingRecommendation(input: {
   athleteName?: string;
 }): Promise<AiTrainingRecommendation> {
   const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.0-flash",
   });
 
   const stravaSummary = input.stravaActivities.slice(0, 30).map((a) => ({
@@ -101,7 +101,7 @@ export async function generateTelegramCoachChatReply(input: {
   athleteName?: string;
 }): Promise<string> {
   const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-2.0-flash",
   });
 
   const stravaSummary = input.stravaActivities.slice(0, 30).map((a) => ({
