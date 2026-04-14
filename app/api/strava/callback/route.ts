@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { encryptSecret } from "@/lib/coach-crypto";
+import { prisma } from "@/lib/db";
 import {
   STRAVA_ACCESS_TOKEN_COOKIE,
   STRAVA_OAUTH_STATE_COOKIE,
   exchangeStravaCodeForToken,
+  fetchStravaAthlete,
 } from "@/lib/strava";
 
 function appBaseUrl(): string {
@@ -42,6 +45,29 @@ export async function GET(request: NextRequest) {
     token = await exchangeStravaCodeForToken(code);
   } catch {
     return connect("error=token_exchange");
+  }
+
+  if (process.env.DATABASE_URL && process.env.COACH_ENCRYPTION_KEY) {
+    try {
+      const athlete = await fetchStravaAthlete(token.access_token);
+      const enc = encryptSecret(token.refresh_token);
+      await prisma.coachProfile.upsert({
+        where: { stravaAthleteId: athlete.id },
+        create: {
+          stravaAthleteId: athlete.id,
+          stravaRefreshCipher: enc.cipherText,
+          stravaRefreshIv: enc.iv,
+          stravaRefreshTag: enc.tag,
+        },
+        update: {
+          stravaRefreshCipher: enc.cipherText,
+          stravaRefreshIv: enc.iv,
+          stravaRefreshTag: enc.tag,
+        },
+      });
+    } catch (err) {
+      console.error("coach strava refresh store failed:", err);
+    }
   }
 
   const res = NextResponse.redirect(`${base}/activities`);

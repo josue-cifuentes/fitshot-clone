@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   IconActivities,
+  IconCoach,
   IconEditor,
   IconHome,
   IconLink,
@@ -14,6 +15,7 @@ const nav = [
   { href: "/connect", label: "Connect", Icon: IconLink },
   { href: "/activities", label: "Activities", Icon: IconActivities },
   { href: "/editor", label: "Editor", Icon: IconEditor },
+  { href: "/coach", label: "Coach", Icon: IconCoach },
 ] as const;
 
 export function AppShell({

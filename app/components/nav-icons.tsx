@@ -71,6 +71,25 @@ export function IconEditor({ className }: { className?: string }) {
   );
 }
 
+export function IconCoach({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+      <path d="M19 3v4M21 5h-4" />
+      <path d="M12 12v4M10 14h4" />
+    </svg>
+  );
+}
+
 export function IconLayers({ className }: { className?: string }) {
   return (
     <svg

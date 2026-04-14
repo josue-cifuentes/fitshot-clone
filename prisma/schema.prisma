@@ -1,0 +1,31 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+/// Coach data keyed by Strava athlete id (from OAuth).
+model CoachProfile {
+  id                    String    @id @default(cuid())
+  stravaAthleteId       Int       @unique
+  garminEmail           String?
+  /// AES-GCM encrypted Garmin password (base64)
+  garminPasswordCipher  String?
+  garminPasswordIv      String?
+  garminPasswordTag     String?
+  /// Encrypted JSON: Garmin OAuth tokens after successful login (optional)
+  garminTokensCipher    String?
+  garminTokensIv        String?
+  garminTokensTag       String?
+  telegramChatId        String?
+  lastRecommendationJson String?
+  lastRecommendationAt  DateTime?
+  /// Encrypted Strava OAuth refresh token (for server/cron without browser cookies).
+  stravaRefreshCipher   String?
+  stravaRefreshIv       String?
+  stravaRefreshTag      String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}

@@ -79,6 +79,34 @@ export async function exchangeStravaCodeForToken(
   return res.json() as Promise<StravaTokenResponse>;
 }
 
+/** Refresh an access token using the long-lived refresh token. */
+export async function refreshStravaAccessToken(
+  refreshToken: string
+): Promise<StravaTokenResponse> {
+  const body = new URLSearchParams({
+    client_id: requireEnv("STRAVA_CLIENT_ID"),
+    client_secret: requireEnv("STRAVA_CLIENT_SECRET"),
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+
+  const res = await fetch(STRAVA_TOKEN, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Strava token refresh failed (${res.status}): ${detail.slice(0, 500)}`
+    );
+  }
+
+  return res.json() as Promise<StravaTokenResponse>;
+}
+
 /** Summary activity fields returned by `GET /athlete/activities`. */
 export type StravaActivity = {
   id: number;
@@ -114,6 +142,57 @@ export async function fetchStravaActivities(
   perPage = 10
 ): Promise<StravaActivity[]> {
   const url = new URL(`${STRAVA_API}/athlete/activities`);
+  url.searchParams.set("per_page", String(perPage));
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Strava activities request failed (${res.status}): ${detail.slice(0, 500)}`
+    );
+  }
+
+  return res.json() as Promise<StravaActivity[]>;
+}
+
+/** Authenticated athlete (`GET /athlete`). */
+export type StravaAthlete = {
+  id: number;
+  username: string;
+  firstname?: string;
+  lastname?: string;
+};
+
+export async function fetchStravaAthlete(
+  accessToken: string
+): Promise<StravaAthlete> {
+  const res = await fetch(`${STRAVA_API}/athlete`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(
+      `Strava athlete request failed (${res.status}): ${detail.slice(0, 500)}`
+    );
+  }
+  return res.json() as Promise<StravaAthlete>;
+}
+
+/**
+ * Activities since `after` (unix seconds), newest first.
+ */
+export async function fetchStravaActivitiesSince(
+  accessToken: string,
+  afterUnixSeconds: number,
+  perPage = 50
+): Promise<StravaActivity[]> {
+  const url = new URL(`${STRAVA_API}/athlete/activities`);
+  url.searchParams.set("after", String(afterUnixSeconds));
   url.searchParams.set("per_page", String(perPage));
 
   const res = await fetch(url, {
