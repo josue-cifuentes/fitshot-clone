@@ -3,17 +3,30 @@ import {
   fetchCoachRecoveryContext,
   getStravaAccessFromStoredRefresh,
 } from "@/lib/coach-pipeline";
+import {
+  generateTelegramCoachChatReply,
+  generateTelegramCoachPhotoReply,
+} from "@/lib/gemini-coach";
 import { prisma } from "@/lib/db";
-import { generateTelegramCoachChatReply } from "@/lib/gemini-coach";
+import { downloadTelegramFileAsBase64 } from "@/lib/telegram-files";
 import { sendTelegramMessage } from "@/lib/telegram-notify";
 import { fetchStravaAthlete } from "@/lib/strava";
 
 export const dynamic = "force-dynamic";
 
+type TelegramPhotoSize = {
+  file_id: string;
+  width: number;
+  height: number;
+  file_size?: number;
+};
+
 type TelegramMessage = {
   message_id: number;
   chat: { id: number; type?: string };
   text?: string;
+  caption?: string;
+  photo?: TelegramPhotoSize[];
 };
 
 type TelegramUpdate = {
@@ -27,6 +40,9 @@ function verifyWebhookSecret(request: NextRequest): boolean {
   const got = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
   return got === expected;
 }
+
+const PHOTO_DEFAULT_PROMPT =
+  "What do you see? Give me fitness/training advice based on this.";
 
 export async function POST(request: NextRequest) {
   if (!verifyWebhookSecret(request)) {
@@ -51,6 +67,8 @@ export async function POST(request: NextRequest) {
 
   const chatId = String(msg.chat.id);
   const text = msg.text?.trim() ?? "";
+  const photos = msg.photo;
+  const hasPhoto = Boolean(photos && photos.length > 0);
 
   try {
     if (text.startsWith("/start")) {
@@ -138,14 +156,43 @@ export async function POST(request: NextRequest) {
     }
 
     const ctx = await fetchCoachRecoveryContext(profile, access);
-    const reply = await generateTelegramCoachChatReply({
-      userMessage: text || "(empty message)",
-      stravaActivities: ctx.stravaActivities,
-      recoveryDays: ctx.recoveryDays,
-      recoverySource: ctx.recoverySource,
-      athleteName,
-    });
-    await sendTelegramMessage(chatId, reply);
+
+    if (hasPhoto && photos?.length) {
+      const best = photos[photos.length - 1];
+      const caption = msg.caption?.trim();
+      const userQ = caption || PHOTO_DEFAULT_PROMPT;
+      const { base64, mimeType } = await downloadTelegramFileAsBase64(
+        best.file_id
+      );
+      const reply = await generateTelegramCoachPhotoReply({
+        userMessage: userQ,
+        imageBase64: base64,
+        imageMimeType: mimeType,
+        stravaActivities: ctx.stravaActivities,
+        recoveryDays: ctx.recoveryDays,
+        recoverySource: ctx.recoverySource,
+        athleteName,
+      });
+      await sendTelegramMessage(chatId, reply);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (text.length > 0) {
+      const reply = await generateTelegramCoachChatReply({
+        userMessage: text,
+        stravaActivities: ctx.stravaActivities,
+        recoveryDays: ctx.recoveryDays,
+        recoverySource: ctx.recoverySource,
+        athleteName,
+      });
+      await sendTelegramMessage(chatId, reply);
+      return NextResponse.json({ ok: true });
+    }
+
+    await sendTelegramMessage(
+      chatId,
+      "Send a short text question or a photo (add a caption if you want)."
+    );
   } catch (e) {
     const m = e instanceof Error ? e.message : "Error";
     try {
