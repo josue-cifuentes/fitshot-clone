@@ -50,7 +50,7 @@ export async function generateTrainingRecommendation(input: {
   const sourceLabel =
     input.recoverySource === "garmin"
       ? "Garmin Connect"
-      : "Apple Health (Health Auto Export)";
+      : "Apple Health (iOS Shortcuts sync)";
 
   const prompt = `You are an endurance coach. Based on the athlete's last Strava sessions and recovery metrics from ${sourceLabel}, recommend ONE training session for TODAY.
 

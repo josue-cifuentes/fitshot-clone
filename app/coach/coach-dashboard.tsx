@@ -85,9 +85,8 @@ export function CoachDashboard() {
     DashboardPayload["appleHealth"] | undefined
   >(undefined);
   const [disconnectGarminLoading, setDisconnectGarminLoading] = useState(false);
-  const [appleSetupLoading, setAppleSetupLoading] = useState(false);
+  const [appleShortcutLoading, setAppleShortcutLoading] = useState(false);
   const [appleDisconnectLoading, setAppleDisconnectLoading] = useState(false);
-  const [appleCopyOk, setAppleCopyOk] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [stravaDisconnectLoading, setStravaDisconnectLoading] = useState(false);
 
@@ -266,22 +265,32 @@ export function CoachDashboard() {
     }
   }
 
-  async function ensureAppleWebhook() {
-    setAppleSetupLoading(true);
+  async function downloadAppleShortcut() {
+    setAppleShortcutLoading(true);
+    setActionError(null);
     try {
-      const res = await fetch("/api/coach/apple-health/setup", {
-        method: "POST",
+      const res = await fetch("/api/health/apple/shortcut", {
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string; webhookUrl?: string };
-      if (!res.ok) throw new Error(data.error || "Setup failed");
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error || "Could not build shortcut");
+      }
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = "FitShot Apple Health.shortcut";
+      a.rel = "noopener";
+      a.click();
+      URL.revokeObjectURL(href);
       await load();
     } catch (e) {
       setActionError(
-        e instanceof Error ? e.message : "Apple Health setup failed"
+        e instanceof Error ? e.message : "Apple Health shortcut failed"
       );
     } finally {
-      setAppleSetupLoading(false);
+      setAppleShortcutLoading(false);
     }
   }
 
@@ -301,16 +310,6 @@ export function CoachDashboard() {
       setActionError(e instanceof Error ? e.message : "Apple disconnect failed");
     } finally {
       setAppleDisconnectLoading(false);
-    }
-  }
-
-  async function copyWebhookUrl(url: string) {
-    try {
-      await navigator.clipboard.writeText(url);
-      setAppleCopyOk(true);
-      setTimeout(() => setAppleCopyOk(false), 2000);
-    } catch {
-      setActionError("Could not copy to clipboard");
     }
   }
 
@@ -420,9 +419,10 @@ export function CoachDashboard() {
         </div>
         <p className="mt-2 text-xs text-[#F5F5F5]/45">
           Disconnect revokes this Strava link at Strava, deletes your coach data
-          for this account (including refresh token, Garmin, Apple Health, and
-          Telegram links), and clears your session cookie. Other Strava users are
-          unaffected. Reconnect anytime from Connect Strava.
+          for this account (including refresh token, Garmin, Apple Health
+          Shortcuts sync, and Telegram links), and clears your session cookie.
+          Other Strava users are unaffected. Reconnect anytime from Connect
+          Strava.
         </p>
       </section>
 
@@ -573,92 +573,51 @@ export function CoachDashboard() {
           <h2 className="text-xs font-bold uppercase tracking-[0.18em] text-[#E8FF00]">
             Apple Health
           </h2>
-          {appleHealth?.hasData && (
-            <span className="rounded-full border border-emerald-500/40 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-200">
-              Connected ✓
-            </span>
-          )}
-          {appleHealth?.waitingForSync && (
-            <span className="rounded-full border border-[#F5F5F5]/20 bg-[#141414] px-3 py-1 text-xs text-[#F5F5F5]/65">
-              Waiting for first sync…
-            </span>
-          )}
-          {(appleHealth?.hasToken || appleHealth?.hasData) && (
-            <button
-              type="button"
-              onClick={() => void disconnectAppleHealth()}
-              disabled={appleDisconnectLoading}
-              className="rounded-xl border border-red-500/50 px-3 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-950/40 disabled:opacity-50"
-            >
-              {appleDisconnectLoading ? "…" : "Disconnect"}
-            </button>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {appleHealth?.hasData && (
+              <span className="rounded-full border border-emerald-500/40 bg-emerald-950/40 px-3 py-1 text-xs font-semibold text-emerald-200">
+                Apple Health Connected ✓
+              </span>
+            )}
+            {appleHealth?.waitingForSync && (
+              <span className="rounded-full border border-[#F5F5F5]/20 bg-[#141414] px-3 py-1 text-xs text-[#F5F5F5]/65">
+                Waiting for first sync…
+              </span>
+            )}
+            {(appleHealth?.hasToken || appleHealth?.hasData) && (
+              <button
+                type="button"
+                onClick={() => void disconnectAppleHealth()}
+                disabled={appleDisconnectLoading}
+                className="rounded-xl border border-red-500/50 px-3 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-950/40 disabled:opacity-50"
+              >
+                {appleDisconnectLoading ? "…" : "Disconnect"}
+              </button>
+            )}
+          </div>
         </div>
         <p className="mt-2 text-sm text-[#F5F5F5]/70">
-          Sync HRV, resting heart rate, sleep, active energy, and steps via the{" "}
-          <strong className="text-[#F5F5F5]">Health Auto Export</strong> app
-          (iOS). FitShot gives you a private webhook URL; the app POSTs JSON to
-          it.
+          Install a personalized iOS Shortcut that reads HRV, resting heart rate,
+          sleep duration and quality, steps, and active energy from the last 24
+          hours and sends them to FitShot. Your account webhook is embedded — no
+          copy-paste.
         </p>
-        <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-[#F5F5F5]/80">
-          <li>
-            Install{" "}
-            <span className="text-[#F5F5F5]">Health Auto Export</span> from the
-            App Store and open it.
-          </li>
-          <li>
-            Tap <strong>Automation</strong> (or <strong>Servers</strong> /
-            <strong>Webhooks</strong>, depending on your version).
-          </li>
-          <li>
-            Add a new server / webhook and choose <strong>POST</strong> with{" "}
-            <strong>JSON</strong> body.
-          </li>
-          <li>
-            Paste your FitShot URL below as the endpoint. Use one export per day
-            or on a schedule that includes the metrics you care about.
-          </li>
-          <li>
-            Enable metrics: <strong>HRV</strong>, <strong>Resting Heart Rate</strong>,{" "}
-            <strong>Sleep</strong> (duration &amp; quality if available),{" "}
-            <strong>Active Energy</strong>, and <strong>Steps</strong>.
-          </li>
-          <li>Save and send a test export — status below should update.</li>
-        </ol>
-        {!appleHealth?.hasToken && (
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => void ensureAppleWebhook()}
-              disabled={appleSetupLoading}
-              className="glass-panel min-h-11 rounded-2xl border border-[#E8FF00]/40 px-4 text-sm font-bold text-[#E8FF00] disabled:opacity-50"
-            >
-              {appleSetupLoading ? "Working…" : "Generate webhook URL"}
-            </button>
-          </div>
-        )}
-        {appleHealth?.webhookUrl ? (
-          <div className="mt-4 rounded-2xl border border-[#F5F5F5]/12 bg-[#141414] p-3">
-            <p className="text-xs font-medium text-[#F5F5F5]/45">Your webhook</p>
-            <p className="mt-1 break-all font-mono text-xs text-[#E8FF00] sm:text-sm">
-              {appleHealth.webhookUrl}
-            </p>
-            <button
-              type="button"
-              onClick={() => void copyWebhookUrl(appleHealth.webhookUrl!)}
-              className="mt-3 rounded-xl border border-[#F5F5F5]/20 px-3 py-1.5 text-xs font-semibold text-[#F5F5F5]"
-            >
-              {appleCopyOk ? "Copied" : "Copy URL"}
-            </button>
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-amber-200/80">
-            Set <code className="rounded bg-[#141414] px-1">NEXT_PUBLIC_APP_URL</code>{" "}
-            so FitShot can build your webhook link (same as Strava OAuth).
-          </p>
-        )}
+        <p className="mt-2 text-xs text-[#F5F5F5]/45">
+          Open FitShot in <strong className="text-[#F5F5F5]">Safari on your iPhone</strong>{" "}
+          for the download to open in Shortcuts.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => void downloadAppleShortcut()}
+            disabled={appleShortcutLoading}
+            className="min-h-11 rounded-2xl border border-[#E8FF00]/40 bg-[#E8FF00]/10 px-4 text-sm font-bold text-[#E8FF00] disabled:opacity-50"
+          >
+            {appleShortcutLoading ? "Preparing…" : "Connect Apple Health"}
+          </button>
+        </div>
         {appleHealth?.lastSyncAt && (
-          <p className="mt-2 text-xs text-[#F5F5F5]/45">
+          <p className="mt-3 text-xs text-[#F5F5F5]/45">
             Last sync:{" "}
             {new Date(appleHealth.lastSyncAt).toLocaleString(undefined, {
               dateStyle: "medium",
@@ -843,8 +802,8 @@ export function CoachDashboard() {
         )}
         {!recoveryPrimary && (
           <p className="mt-3 text-sm text-[#F5F5F5]/45">
-            Connect Garmin or complete Apple Health setup and wait for the first
-            webhook sync.
+            Connect Garmin or add the Apple Health shortcut and wait for the first
+            sync.
           </p>
         )}
       </section>

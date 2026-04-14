@@ -5,7 +5,7 @@ import { mergeAppleHealthIntoStoredJson } from "@/lib/apple-health";
 export const dynamic = "force-dynamic";
 
 /**
- * Health Auto Export (iOS) webhook — register URL:
+ * Apple Health webhook (iOS Shortcuts JSON POST, legacy Health Auto Export):
  * `GET|POST /api/health/apple?token=YOUR_TOKEN`
  */
 export async function GET(request: NextRequest) {

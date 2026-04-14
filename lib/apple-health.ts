@@ -1,4 +1,4 @@
-/** One day of metrics from Apple Health (via Health Auto Export webhook). */
+/** One day of metrics from Apple Health (Shortcuts POST or legacy Health Auto Export). */
 export type AppleHealthDay = {
   date: string;
   hrv?: number;
@@ -42,7 +42,7 @@ function num(x: unknown): number | undefined {
 }
 
 /**
- * Normalize Health Auto Export (or similar) JSON into a single day update.
+ * Normalize Apple Health JSON (Shortcuts POST, Health Auto Export, etc.).
  * Accepts flat or nested shapes and common key aliases.
  */
 export function normalizeAppleHealthPayload(

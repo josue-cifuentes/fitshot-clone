@@ -29,7 +29,7 @@ model CoachProfile {
   stravaRefreshCipher   String?
   stravaRefreshIv       String?
   stravaRefreshTag      String?
-  /// Secret token for Health Auto Export webhook (`/api/health/apple?token=…`).
+  /// Secret token for Apple Health sync (`/api/health/apple?token=…`, iOS Shortcuts).
   healthExportToken     String?   @unique
   /// JSON array of daily Apple Health snapshots (last ~14 days, merged by date).
   appleHealthDaysJson   String?
