@@ -94,6 +94,37 @@ Rules:
 
 const TELEGRAM_STRAVA_CAP = 12;
 
+const TELEGRAM_FLASH_MODEL = "gemini-2.5-flash";
+
+const TELEGRAM_GENERATION = {
+  maxOutputTokens: 400,
+  temperature: 0.35,
+} as const;
+
+const TELEGRAM_HISTORY_MSG_CAP = 520;
+
+function formatTelegramConversationBlock(
+  history: { role: "user" | "assistant"; content: string }[]
+): string {
+  if (history.length === 0) return "";
+  const lines = history.map((h) => {
+    const label = h.role === "user" ? "User" : "Coach";
+    const text =
+      h.content.length > TELEGRAM_HISTORY_MSG_CAP
+        ? `${h.content.slice(0, TELEGRAM_HISTORY_MSG_CAP)}…`
+        : h.content;
+    return `${label}: ${text}`;
+  });
+  return `Earlier in this chat (oldest first):\n${lines.join("\n\n")}`;
+}
+
+function trimTelegramReply(text: string): string {
+  const max = 1100;
+  const t = text.trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
+}
+
 /** Compact fitness context for Telegram (text + vision) — smaller prompt = faster. */
 function formatTelegramFitnessContext(input: {
   athleteName?: string;
@@ -130,46 +161,36 @@ Recovery (oldest → newest):
 ${rec.join("\n") || "(none)"}`;
 }
 
-const TELEGRAM_REPLY_RULES = `Telegram mobile — keep answers fast to read:
-- Maximum 3–4 short paragraphs total.
-- No long bullet lists; avoid numbered lists unless 2–3 items max. Prefer short sentences.
-- Lead with the direct answer, then brief context. Plain text only, no code fences.
-- Stay under ~1200 characters when you can; never ramble.`;
-
 /** Conversational reply for Telegram; plain text, no structured JSON. */
 export async function generateTelegramCoachChatReply(input: {
   userMessage: string;
+  conversationHistory: { role: "user" | "assistant"; content: string }[];
   stravaActivities: StravaActivity[];
   recoveryDays: RecoveryDayForPrompt[];
   recoverySource: "garmin" | "apple";
   athleteName?: string;
 }): Promise<string> {
   const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: TELEGRAM_FLASH_MODEL,
+    generationConfig: TELEGRAM_GENERATION,
   });
 
   const ctx = formatTelegramFitnessContext(input);
-  const prompt = `You are FitShot's endurance & recovery coach on Telegram.
+  const hist = formatTelegramConversationBlock(input.conversationHistory);
+  const prompt = `FitShot Telegram coach. Reply in 2–3 short paragraphs, plain text only.
 
-${TELEGRAM_REPLY_RULES}
+Rules: Tie every recommendation to the Athlete Context below—use their name when given, cite specific sessions (date/type/distance), and recovery signals (HRV, sleep score or duration, body battery, resting HR, steps/kcal as relevant). Do not give generic advice that ignores that data. If the context lacks what you need, say so in one sentence. Do not invent numbers.
 
-Their message:
+${hist ? `${hist}\n\n` : ""}Athlete Context:
+${ctx}
+
+Current message:
 """${input.userMessage.replace(/"""/g, "'")}"""
 
-Use only the fitness context below (do not invent Strava/recovery numbers). If something isn't in the data, say so briefly.
-
---- Context ---
-${ctx}
----
-
-Reply now.`;
+Answer now.`;
 
   const res = await model.generateContent(prompt);
-  let text = res.response.text().trim();
-  if (text.length > 1600) {
-    text = `${text.slice(0, 1580)}…`;
-  }
-  return text;
+  return trimTelegramReply(res.response.text());
 }
 
 /** Photo + caption: vision analysis with same fitness context and concise Telegram style. */
@@ -177,31 +198,30 @@ export async function generateTelegramCoachPhotoReply(input: {
   userMessage: string;
   imageBase64: string;
   imageMimeType: string;
+  conversationHistory: { role: "user" | "assistant"; content: string }[];
   stravaActivities: StravaActivity[];
   recoveryDays: RecoveryDayForPrompt[];
   recoverySource: "garmin" | "apple";
   athleteName?: string;
 }): Promise<string> {
   const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: TELEGRAM_FLASH_MODEL,
+    generationConfig: TELEGRAM_GENERATION,
   });
 
   const ctx = formatTelegramFitnessContext(input);
-  const prompt = `You are FitShot's coach on Telegram. The user sent a photo.
+  const hist = formatTelegramConversationBlock(input.conversationHistory);
+  const prompt = `FitShot Telegram coach — user sent an image. Reply in 2–3 short paragraphs, plain text.
 
-User question (or instruction):
+Rules: Connect what you see to the Athlete Context (name, recent sessions, HRV/sleep/recovery). No generic coaching—ground guidance in their data. If the image isn't training-related, say so briefly. Injury/medical: cautious tone; suggest a clinician if serious.
+
+${hist ? `${hist}\n\n` : ""}Athlete Context:
+${ctx}
+
+Question about the image:
 """${input.userMessage.replace(/"""/g, "'")}"""
 
-${TELEGRAM_REPLY_RULES}
-
-Personalize using this athlete context (do not invent metrics):
---- Context ---
-${ctx}
----
-
-Look at the image. Give practical fitness/training-related help: e.g. food/meal → brief nutrition angle; workout screenshot → interpret key numbers; map/route → training relevance; injury or body area → safe, non-alarming guidance and when to see a pro if serious; equipment/form if visible. If the image isn't fitness-related, say so in one short line and stop.
-
-Reply now in plain text.`;
+Describe what matters in the image, then advise.`;
 
   const res = await model.generateContent([
     prompt,
@@ -212,9 +232,5 @@ Reply now in plain text.`;
       },
     },
   ]);
-  let text = res.response.text().trim();
-  if (text.length > 1600) {
-    text = `${text.slice(0, 1580)}…`;
-  }
-  return text;
+  return trimTelegramReply(res.response.text());
 }

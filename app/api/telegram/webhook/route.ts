@@ -8,6 +8,10 @@ import {
   generateTelegramCoachPhotoReply,
 } from "@/lib/gemini-coach";
 import { prisma } from "@/lib/db";
+import {
+  appendTelegramCoachExchange,
+  getTelegramCoachMemory,
+} from "@/lib/telegram-coach-memory";
 import { downloadTelegramFileAsBase64 } from "@/lib/telegram-files";
 import { sendTelegramMessage } from "@/lib/telegram-notify";
 import { fetchStravaAthlete } from "@/lib/strava";
@@ -156,6 +160,7 @@ export async function POST(request: NextRequest) {
     }
 
     const ctx = await fetchCoachRecoveryContext(profile, access);
+    const conversationHistory = await getTelegramCoachMemory(profile.id);
 
     if (hasPhoto && photos?.length) {
       const best = photos[photos.length - 1];
@@ -168,24 +173,36 @@ export async function POST(request: NextRequest) {
         userMessage: userQ,
         imageBase64: base64,
         imageMimeType: mimeType,
+        conversationHistory,
         stravaActivities: ctx.stravaActivities,
         recoveryDays: ctx.recoveryDays,
         recoverySource: ctx.recoverySource,
         athleteName,
       });
       await sendTelegramMessage(chatId, reply);
+      await appendTelegramCoachExchange({
+        coachProfileId: profile.id,
+        userContent: `[Photo] ${userQ}`,
+        assistantContent: reply,
+      });
       return NextResponse.json({ ok: true });
     }
 
     if (text.length > 0) {
       const reply = await generateTelegramCoachChatReply({
         userMessage: text,
+        conversationHistory,
         stravaActivities: ctx.stravaActivities,
         recoveryDays: ctx.recoveryDays,
         recoverySource: ctx.recoverySource,
         athleteName,
       });
       await sendTelegramMessage(chatId, reply);
+      await appendTelegramCoachExchange({
+        coachProfileId: profile.id,
+        userContent: text,
+        assistantContent: reply,
+      });
       return NextResponse.json({ ok: true });
     }
 

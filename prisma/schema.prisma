@@ -36,4 +36,18 @@ model CoachProfile {
   appleHealthLastSyncAt DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
+  telegramMessages      TelegramCoachMessage[]
+}
+
+/// Last N Telegram coach exchanges per linked profile (user + assistant rows; capped in app).
+model TelegramCoachMessage {
+  id             String       @id @default(cuid())
+  coachProfileId String
+  coachProfile   CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+  /// "user" | "assistant"
+  role           String
+  content        String       @db.Text
+  createdAt      DateTime     @default(now())
+
+  @@index([coachProfileId, createdAt])
 }
