@@ -89,6 +89,7 @@ export function CoachDashboard() {
   const [appleDisconnectLoading, setAppleDisconnectLoading] = useState(false);
   const [appleCopyOk, setAppleCopyOk] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [stravaDisconnectLoading, setStravaDisconnectLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -227,6 +228,26 @@ export function CoachDashboard() {
     }
   }
 
+  async function disconnectStrava() {
+    if (!confirm("Disconnect Strava? Coach will lose access until you connect again."))
+      return;
+    setStravaDisconnectLoading(true);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/coach/strava/disconnect", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error || "Disconnect failed");
+      await load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Strava disconnect failed");
+    } finally {
+      setStravaDisconnectLoading(false);
+    }
+  }
+
   async function disconnectGarmin() {
     if (!confirm("Disconnect Garmin and remove stored credentials?")) return;
     setDisconnectGarminLoading(true);
@@ -333,7 +354,7 @@ export function CoachDashboard() {
           className="mt-4 inline-flex min-h-12 items-center justify-center rounded-2xl px-5 text-sm font-bold text-[#0A0A0A] transition hover:brightness-110"
           style={{ backgroundColor: "#E8FF00" }}
         >
-          Go to Connect
+          Connect Strava
         </a>
       </div>
     );
@@ -377,6 +398,31 @@ export function CoachDashboard() {
           daily plan from Gemini. Telegram for optional pings.
         </p>
       </header>
+
+      <section className="glass-panel rounded-2xl p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xs font-bold uppercase tracking-[0.18em] text-[#E8FF00]">
+            Strava
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-[#E8FF00]/40 bg-[#E8FF00]/10 px-3 py-1 text-xs font-semibold text-[#E8FF00]">
+              Connected
+            </span>
+            <button
+              type="button"
+              onClick={() => void disconnectStrava()}
+              disabled={stravaDisconnectLoading}
+              className="rounded-xl border border-red-500/50 px-3 py-1 text-xs font-semibold text-red-200 transition hover:bg-red-950/40 disabled:opacity-50"
+            >
+              {stravaDisconnectLoading ? "…" : "Disconnect"}
+            </button>
+          </div>
+        </div>
+        <p className="mt-2 text-xs text-[#F5F5F5]/45">
+          Disconnect clears your session cookie and removes the stored Strava
+          refresh token from FitShot. Reconnect anytime from Connect Strava.
+        </p>
+      </section>
 
       {actionError && (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100">
