@@ -10,7 +10,7 @@ async function getJwtFromRequest() {
   if (!secret) return null;
   const h = await headers();
   return getToken({
-    req: { headers: h } as Parameters<typeof getToken>[0]["req"],
+    req: { headers: h } as import("next/server").NextRequest,
     secret,
     secureCookie: process.env.NODE_ENV === "production",
   });

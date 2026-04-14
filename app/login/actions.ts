@@ -1,12 +1,14 @@
 "use server";
 
-import { signIn } from "@/auth";
+import { redirect } from "next/navigation";
 
 export async function signInWithStrava(formData: FormData) {
   const cb = formData.get("callbackUrl");
-  const redirectTo =
+  const callbackUrl =
     typeof cb === "string" && cb.startsWith("/") && !cb.startsWith("//")
       ? cb
       : "/coach";
-  await signIn("strava", { redirectTo });
+  redirect(
+    `/api/auth/signin/strava?callbackUrl=${encodeURIComponent(callbackUrl)}`
+  );
 }

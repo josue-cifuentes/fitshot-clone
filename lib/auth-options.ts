@@ -1,12 +1,11 @@
-import NextAuth from "next-auth";
+import type { NextAuthOptions } from "next-auth";
 import Strava from "next-auth/providers/strava";
 import {
   fetchStravaAthlete,
   refreshStravaAccessToken,
 } from "@/lib/strava";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
-  trustHost: true,
+export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   pages: {
     signIn: "/login",
@@ -137,4 +136,4 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
   },
-});
+};

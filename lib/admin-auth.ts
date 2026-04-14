@@ -1,5 +1,6 @@
 import type { StravaAthlete } from "@/lib/strava";
-import { auth } from "@/auth";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "@/lib/auth-options";
 import { fetchStravaAthlete } from "@/lib/strava";
 import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
 
@@ -11,7 +12,7 @@ export async function verifyAdminSession(): Promise<
   | { ok: true; athlete: StravaAthlete }
   | { ok: false }
 > {
-  const session = await auth();
+  const session = await getServerSession(authOptions);
   if (!session?.user) return { ok: false };
 
   const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
