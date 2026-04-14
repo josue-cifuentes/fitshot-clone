@@ -66,7 +66,7 @@ export function normalizeAppleHealthPayload(
       (m as { dateKey: string }).dateKey) ||
     "";
 
-  let date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw)
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(dateRaw)
     ? dateRaw
     : dayKey(now);
 

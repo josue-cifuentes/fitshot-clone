@@ -1,8 +1,7 @@
-import { cookies } from "next/headers";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
 import {
-  STRAVA_ACCESS_TOKEN_COOKIE,
   fetchStravaActivities,
   formatCalories,
   formatCadence,
@@ -135,9 +134,9 @@ function ActivityCard({ activity }: { activity: StravaActivity }) {
 }
 
 export default async function ActivitiesPage() {
-  const token = (await cookies()).get(STRAVA_ACCESS_TOKEN_COOKIE)?.value;
+  const token = await getStravaAccessTokenFromCookies();
   if (!token) {
-    redirect("/connect");
+    redirect("/login");
   }
 
   let activities: StravaActivity[];
@@ -155,7 +154,7 @@ export default async function ActivitiesPage() {
             again from the link below.
           </p>
           <Link
-            href="/connect"
+            href="/login"
             className="mt-6 inline-flex min-h-12 items-center justify-center rounded-2xl bg-[#E8FF00] px-6 text-sm font-bold text-[#0A0A0A] sm:min-h-14 sm:text-base"
           >
             Reconnect Strava
@@ -178,7 +177,7 @@ export default async function ActivitiesPage() {
             </p>
           </div>
           <Link
-            href="/connect"
+            href="/login"
             className="text-xs font-semibold text-[#E8FF00] underline-offset-4 hover:underline sm:text-sm"
           >
             Account / reconnect

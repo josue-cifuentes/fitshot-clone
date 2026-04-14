@@ -187,6 +187,8 @@ export type StravaAthlete = {
   username: string;
   firstname?: string;
   lastname?: string;
+  /** Avatar URL when Strava returns it. */
+  profile?: string;
   /** Present when Strava returns it for the authorized athlete. */
   email?: string | null;
 };

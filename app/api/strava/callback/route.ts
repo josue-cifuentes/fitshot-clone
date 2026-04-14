@@ -21,9 +21,7 @@ export async function GET(request: NextRequest) {
   try {
   const base = appBaseUrl();
   const connect = (q?: string) =>
-    NextResponse.redirect(
-      q ? `${base}/connect?${q}` : `${base}/connect`
-    );
+    NextResponse.redirect(q ? `${base}/login?${q}` : `${base}/login`);
 
   const error = request.nextUrl.searchParams.get("error");
   if (error === "access_denied") {
@@ -97,7 +95,7 @@ export async function GET(request: NextRequest) {
     console.error("strava callback:", e);
     try {
       const base = appBaseUrl();
-      return NextResponse.redirect(`${base}/connect?error=server`);
+      return NextResponse.redirect(`${base}/login?error=server`);
     } catch {
       return internalServerErrorJson();
     }

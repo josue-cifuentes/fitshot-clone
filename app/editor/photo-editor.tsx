@@ -1297,7 +1297,7 @@ export default function PhotoEditor({ activities, appUrl }: PhotoEditorProps) {
           {activities.length === 0 ? (
             <p className="shrink-0 text-sm font-medium text-[#E8FF00]/90">
               No Strava activities loaded.{" "}
-              <Link href="/connect" className="font-bold underline">
+              <Link href="/login" className="font-bold underline">
                 Reconnect
               </Link>
             </p>

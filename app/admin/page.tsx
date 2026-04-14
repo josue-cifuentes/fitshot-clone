@@ -16,12 +16,12 @@ export const metadata: Metadata = {
 
 export default async function AdminPage() {
   if (!process.env.DATABASE_URL) {
-    redirect("/");
+    redirect("/coach");
   }
 
   const auth = await verifyAdminSession();
   if (!auth.ok) {
-    redirect("/");
+    redirect("/coach");
   }
 
   const profiles = await prisma.coachProfile.findMany({

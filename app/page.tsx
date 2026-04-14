@@ -1,9 +1,8 @@
-import { cookies } from "next/headers";
 import Link from "next/link";
-import { STRAVA_ACCESS_TOKEN_COOKIE } from "@/lib/strava";
+import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
 
 export default async function Home() {
-  const token = (await cookies()).get(STRAVA_ACCESS_TOKEN_COOKIE)?.value;
+  const token = await getStravaAccessTokenFromCookies();
   const connected = Boolean(token);
 
   return (
@@ -32,7 +31,7 @@ export default async function Home() {
             </Link>
           ) : (
             <Link
-              href="/connect"
+              href="/login"
               className="flex min-h-14 items-center justify-center rounded-2xl bg-[#E8FF00] px-6 text-base font-bold text-[#0A0A0A] shadow-lg shadow-[#E8FF00]/15 transition hover:brightness-110 active:scale-[0.99] sm:min-h-16 sm:text-lg"
             >
               Connect Strava

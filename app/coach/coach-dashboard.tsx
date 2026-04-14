@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { signOut } from "next-auth/react";
 import type { AppleHealthDay } from "@/lib/apple-health";
 import type { StravaActivity } from "@/lib/strava";
 import type { GarminRecoveryDay } from "@/lib/garmin-recovery";
@@ -28,6 +29,23 @@ type DashboardPayload = {
   profile?: { hasGarmin: boolean; telegramChatId: string };
   lastRecommendationAt?: string | null;
 };
+
+function logCoachClientError(context: string, err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? err.stack : undefined;
+  console.error(`[coach page / ${context}] ${msg}`);
+  if (stack) console.error(stack);
+}
+
+async function readJson<T>(res: Response, context: string): Promise<T> {
+  const text = await res.text();
+  try {
+    return (text.trim() ? JSON.parse(text) : {}) as T;
+  } catch (e) {
+    logCoachClientError(`${context} (JSON parse)`, e);
+    throw new Error("Invalid response from server");
+  }
+}
 
 function fmtPaceSecondsPerKm(sPerKm: number): string {
   if (!Number.isFinite(sPerKm) || sPerKm <= 0) return "—";
@@ -98,7 +116,7 @@ export function CoachDashboard() {
     try {
       const res = await fetch("/api/coach/dashboard", { credentials: "include" });
       setStatus(res.status);
-      const data = (await res.json()) as DashboardPayload;
+      const data = await readJson<DashboardPayload>(res, "GET /api/coach/dashboard");
       if (!res.ok) {
         throw new Error(data.error || "Failed to load");
       }
@@ -123,6 +141,7 @@ export function CoachDashboard() {
       setRecommendation(data.recommendation ?? null);
       setRecAt(data.lastRecommendationAt ?? null);
     } catch (e) {
+      logCoachClientError("GET /api/coach/dashboard", e);
       setError(e instanceof Error ? e.message : "Error");
     } finally {
       setLoading(false);
@@ -144,12 +163,13 @@ export function CoachDashboard() {
         body: JSON.stringify({ email, password }),
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readJson<{ error?: string }>(res, "POST /api/coach/garmin");
       if (!res.ok) throw new Error(data.error || "Garmin connect failed");
       setEmail("");
       setPassword("");
       await load();
     } catch (e) {
+      logCoachClientError("POST /api/coach/garmin", e);
       setGarminFormError(e instanceof Error ? e.message : "Error");
     } finally {
       setSubmitGarmin(false);
@@ -164,10 +184,14 @@ export function CoachDashboard() {
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string; deepLink?: string };
+      const data = await readJson<{ error?: string; deepLink?: string }>(
+        res,
+        "POST /api/coach/telegram/setup"
+      );
       if (!res.ok) throw new Error(data.error || "Could not create link");
       await load();
     } catch (e) {
+      logCoachClientError("POST /api/coach/telegram/setup", e);
       setActionError(e instanceof Error ? e.message : "Telegram setup failed");
     } finally {
       setTgSetupLoading(false);
@@ -183,10 +207,14 @@ export function CoachDashboard() {
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readJson<{ error?: string }>(
+        res,
+        "POST /api/coach/telegram/disconnect"
+      );
       if (!res.ok) throw new Error(data.error || "Disconnect failed");
       await load();
     } catch (e) {
+      logCoachClientError("POST /api/coach/telegram/disconnect", e);
       setActionError(e instanceof Error ? e.message : "Disconnect failed");
     } finally {
       setTgDisconnectLoading(false);
@@ -198,7 +226,8 @@ export function CoachDashboard() {
       await navigator.clipboard.writeText(url);
       setTgCopyOk(true);
       setTimeout(() => setTgCopyOk(false), 2000);
-    } catch {
+    } catch (e) {
+      logCoachClientError("clipboard", e);
       setActionError("Could not copy to clipboard");
     }
   }
@@ -211,16 +240,17 @@ export function CoachDashboard() {
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as {
+      const data = await readJson<{
         error?: string;
         recommendation?: AiTrainingRecommendation;
-      };
+      }>(res, "POST /api/coach/recommend");
       if (!res.ok) throw new Error(data.error || "Recommendation failed");
       if (data.recommendation) {
         setRecommendation(data.recommendation);
         setRecAt(new Date().toISOString());
       }
     } catch (e) {
+      logCoachClientError("POST /api/coach/recommend", e);
       setRecError(e instanceof Error ? e.message : "Error");
     } finally {
       setRecLoading(false);
@@ -237,10 +267,14 @@ export function CoachDashboard() {
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readJson<{ error?: string }>(
+        res,
+        "POST /api/coach/strava/disconnect"
+      );
       if (!res.ok) throw new Error(data.error || "Disconnect failed");
-      await load();
+      await signOut({ callbackUrl: "/login" });
     } catch (e) {
+      logCoachClientError("POST /api/coach/strava/disconnect", e);
       setActionError(e instanceof Error ? e.message : "Strava disconnect failed");
     } finally {
       setStravaDisconnectLoading(false);
@@ -255,10 +289,14 @@ export function CoachDashboard() {
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readJson<{ error?: string }>(
+        res,
+        "POST /api/coach/garmin/disconnect"
+      );
       if (!res.ok) throw new Error(data.error || "Disconnect failed");
       await load();
     } catch (e) {
+      logCoachClientError("POST /api/coach/garmin/disconnect", e);
       setActionError(e instanceof Error ? e.message : "Disconnect failed");
     } finally {
       setDisconnectGarminLoading(false);
@@ -273,7 +311,10 @@ export function CoachDashboard() {
         credentials: "include",
       });
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
+        const data = await readJson<{ error?: string }>(
+          res,
+          "GET /api/health/apple/shortcut"
+        );
         throw new Error(data.error || "Could not build shortcut");
       }
       const blob = await res.blob();
@@ -286,6 +327,7 @@ export function CoachDashboard() {
       URL.revokeObjectURL(href);
       await load();
     } catch (e) {
+      logCoachClientError("GET /api/health/apple/shortcut", e);
       setActionError(
         e instanceof Error ? e.message : "Apple Health shortcut failed"
       );
@@ -303,10 +345,14 @@ export function CoachDashboard() {
         method: "POST",
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readJson<{ error?: string }>(
+        res,
+        "POST /api/coach/apple-health/disconnect"
+      );
       if (!res.ok) throw new Error(data.error || "Disconnect failed");
       await load();
     } catch (e) {
+      logCoachClientError("POST /api/coach/apple-health/disconnect", e);
       setActionError(e instanceof Error ? e.message : "Apple disconnect failed");
     } finally {
       setAppleDisconnectLoading(false);
@@ -324,10 +370,11 @@ export function CoachDashboard() {
         body: JSON.stringify({}),
         credentials: "include",
       });
-      const data = (await res.json()) as { error?: string };
+      const data = await readJson<{ error?: string }>(res, "POST /api/coach/notify");
       if (!res.ok) throw new Error(data.error || "Notify failed");
       setNotifyOk(true);
     } catch (e) {
+      logCoachClientError("POST /api/coach/notify", e);
       setNotifyError(e instanceof Error ? e.message : "Notify failed");
     } finally {
       setNotifyLoading(false);
@@ -346,14 +393,14 @@ export function CoachDashboard() {
     return (
       <div className="glass-panel rounded-2xl p-6 text-center">
         <p className="text-sm text-[#F5F5F5]/80">
-          Connect Strava from the Connect tab to use AI Coach.
+          Sign in with Strava to use AI Coach.
         </p>
         <a
-          href="/connect"
+          href="/login"
           className="mt-4 inline-flex min-h-12 items-center justify-center rounded-2xl px-5 text-sm font-bold text-[#0A0A0A] transition hover:brightness-110"
           style={{ backgroundColor: "#E8FF00" }}
         >
-          Connect Strava
+          Sign in
         </a>
       </div>
     );
@@ -385,17 +432,26 @@ export function CoachDashboard() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
-        <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#E8FF00]">
-          AI Coach
-        </p>
-        <h1 className="mt-2 text-2xl font-bold tracking-tight text-[#F5F5F5]">
-          Training & recovery
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-[#F5F5F5]/55">
-          Strava load, recovery from Garmin (preferred) or Apple Health, and a
-          daily plan from Gemini. Telegram for optional pings.
-        </p>
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#E8FF00]">
+            AI Coach
+          </p>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight text-[#F5F5F5]">
+            Training & recovery
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-[#F5F5F5]/55">
+            Strava load, recovery from Garmin (preferred) or Apple Health, and a
+            daily plan from Gemini. Telegram for optional pings.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void signOut({ callbackUrl: "/login" })}
+          className="shrink-0 rounded-xl border border-[#F5F5F5]/20 px-4 py-2 text-sm font-semibold text-[#F5F5F5]/90 transition hover:bg-[#F5F5F5]/10"
+        >
+          Sign out
+        </button>
       </header>
 
       <section className="glass-panel rounded-2xl p-4 sm:p-5">
@@ -420,9 +476,8 @@ export function CoachDashboard() {
         <p className="mt-2 text-xs text-[#F5F5F5]/45">
           Disconnect revokes this Strava link at Strava, deletes your coach data
           for this account (including refresh token, Garmin, Apple Health
-          Shortcuts sync, and Telegram links), and clears your session cookie.
-          Other Strava users are unaffected. Reconnect anytime from Connect
-          Strava.
+          Shortcuts sync, and Telegram links), then signs you out. Other Strava
+          users are unaffected. Sign in again from the login page to reconnect.
         </p>
       </section>
 

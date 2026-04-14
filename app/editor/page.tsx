@@ -1,16 +1,15 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
 import {
-  STRAVA_ACCESS_TOKEN_COOKIE,
   fetchStravaActivities,
   type StravaActivity,
 } from "@/lib/strava";
 import { EditorShell } from "./editor-shell";
 
 export default async function EditorPage() {
-  const token = (await cookies()).get(STRAVA_ACCESS_TOKEN_COOKIE)?.value;
+  const token = await getStravaAccessTokenFromCookies();
   if (!token) {
-    redirect("/connect");
+    redirect("/login");
   }
 
   let activities: StravaActivity[] = [];

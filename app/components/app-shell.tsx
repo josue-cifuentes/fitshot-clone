@@ -12,7 +12,7 @@ import {
 
 const nav = [
   { href: "/", label: "Home", Icon: IconHome },
-  { href: "/connect", label: "Connect", Icon: IconLink },
+  { href: "/login", label: "Connect", Icon: IconLink },
   { href: "/activities", label: "Activities", Icon: IconActivities },
   { href: "/editor", label: "Editor", Icon: IconEditor },
   { href: "/coach", label: "Coach", Icon: IconCoach },
