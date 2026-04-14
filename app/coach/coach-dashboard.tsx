@@ -419,8 +419,10 @@ export function CoachDashboard() {
           </div>
         </div>
         <p className="mt-2 text-xs text-[#F5F5F5]/45">
-          Disconnect clears your session cookie and removes the stored Strava
-          refresh token from FitShot. Reconnect anytime from Connect Strava.
+          Disconnect revokes this Strava link at Strava, deletes your coach data
+          for this account (including refresh token, Garmin, Apple Health, and
+          Telegram links), and clears your session cookie. Other Strava users are
+          unaffected. Reconnect anytime from Connect Strava.
         </p>
       </section>
 

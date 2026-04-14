@@ -47,6 +47,7 @@ export async function GET(request: NextRequest) {
     return connect("error=token_exchange");
   }
 
+  // Persist refresh token for this Strava athlete only (multi-user: keyed by athlete.id).
   if (process.env.DATABASE_URL && process.env.COACH_ENCRYPTION_KEY) {
     try {
       const athlete = await fetchStravaAthlete(token.access_token);

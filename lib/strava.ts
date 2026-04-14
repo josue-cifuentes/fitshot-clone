@@ -1,5 +1,6 @@
 const STRAVA_AUTHORIZE = "https://www.strava.com/oauth/authorize";
 const STRAVA_TOKEN = "https://www.strava.com/api/v3/oauth/token";
+const STRAVA_DEAUTHORIZE = "https://www.strava.com/oauth/deauthorize";
 const STRAVA_API = "https://www.strava.com/api/v3";
 
 /** Cookie name for the Strava access token (set by OAuth callback). */
@@ -105,6 +106,27 @@ export async function refreshStravaAccessToken(
   }
 
   return res.json() as Promise<StravaTokenResponse>;
+}
+
+/**
+ * Revoke the current access token at Strava (disconnect / logout).
+ * @see https://developers.strava.com/docs/authentication/#deauthorization
+ */
+export async function deauthorizeStravaAccessToken(
+  accessToken: string
+): Promise<void> {
+  const res = await fetch(STRAVA_DEAUTHORIZE, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ access_token: accessToken }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    console.warn(
+      `Strava deauthorize failed (${res.status}): ${detail.slice(0, 300)}`
+    );
+  }
 }
 
 /** Summary activity fields returned by `GET /athlete/activities`. */

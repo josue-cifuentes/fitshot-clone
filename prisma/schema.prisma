@@ -6,7 +6,8 @@ datasource db {
   provider = "postgresql"
 }
 
-/// Coach data keyed by Strava athlete id (from OAuth).
+/// Coach data: one row per Strava account. `stravaAthleteId` comes from OAuth and
+/// isolates users — each Strava athlete has their own row (no shared global profile).
 model CoachProfile {
   id                    String    @id @default(cuid())
   stravaAthleteId       Int       @unique
