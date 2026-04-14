@@ -52,15 +52,24 @@ export async function GET(request: NextRequest) {
     try {
       const athlete = await fetchStravaAthlete(token.access_token);
       const enc = encryptSecret(token.refresh_token);
+      const displayName =
+        [athlete.firstname, athlete.lastname].filter(Boolean).join(" ").trim() ||
+        athlete.username;
       await prisma.coachProfile.upsert({
         where: { stravaAthleteId: athlete.id },
         create: {
           stravaAthleteId: athlete.id,
+          stravaEmail: athlete.email?.trim() || null,
+          stravaUsername: athlete.username,
+          stravaDisplayName: displayName,
           stravaRefreshCipher: enc.cipherText,
           stravaRefreshIv: enc.iv,
           stravaRefreshTag: enc.tag,
         },
         update: {
+          stravaEmail: athlete.email?.trim() || null,
+          stravaUsername: athlete.username,
+          stravaDisplayName: displayName,
           stravaRefreshCipher: enc.cipherText,
           stravaRefreshIv: enc.iv,
           stravaRefreshTag: enc.tag,

@@ -11,6 +11,10 @@ datasource db {
 model CoachProfile {
   id                    String    @id @default(cuid())
   stravaAthleteId       Int       @unique
+  /// From Strava /athlete (for admin list); may be null if not returned by API.
+  stravaEmail           String?
+  stravaUsername        String?
+  stravaDisplayName     String?
   garminEmail           String?
   /// AES-GCM encrypted Garmin password (base64)
   garminPasswordCipher  String?
