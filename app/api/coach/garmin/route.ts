@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { GarminConnect } from "@flow-js/garmin-connect";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { encryptSecret } from "@/lib/coach-crypto";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { encryptGarminTokens } from "@/lib/garmin-client-from-profile";
 import { prisma } from "@/lib/db";
 
 export async function POST(request: Request) {
+  try {
   if (!process.env.COACH_ENCRYPTION_KEY || !process.env.DATABASE_URL) {
     return NextResponse.json(
       { error: "Coach storage is not configured (DATABASE_URL, COACH_ENCRYPTION_KEY)." },
@@ -70,4 +72,7 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ ok: true });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

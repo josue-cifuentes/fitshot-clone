@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { prisma } from "@/lib/db";
 import {
   notifyProfileIfConfigured,
@@ -19,6 +20,7 @@ function authorize(req: NextRequest): boolean {
  * Configure in vercel.json: `"schedule": "0 13 * * *"`
  */
 export async function GET(request: NextRequest) {
+  try {
   if (!authorize(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -56,4 +58,7 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.json({ processed: results.length, results });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

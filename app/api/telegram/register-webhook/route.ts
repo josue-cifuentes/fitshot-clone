@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { getPublicAppUrl } from "@/lib/public-app-url";
 
 function authorize(req: NextRequest): boolean {
@@ -14,6 +15,7 @@ function authorize(req: NextRequest): boolean {
  * Optional: set TELEGRAM_WEBHOOK_SECRET — Telegram will send it as X-Telegram-Bot-Api-Secret-Token.
  */
 export async function POST(req: NextRequest) {
+  try {
   if (!authorize(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -54,4 +56,7 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true, webhookUrl: url });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

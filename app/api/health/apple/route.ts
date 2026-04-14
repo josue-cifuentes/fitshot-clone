@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { prisma } from "@/lib/db";
 import { mergeAppleHealthIntoStoredJson } from "@/lib/apple-health";
 
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
  * `GET|POST /api/health/apple?token=YOUR_TOKEN`
  */
 export async function GET(request: NextRequest) {
+  try {
   const token = request.nextUrl.searchParams.get("token")?.trim();
   if (!token) {
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
@@ -26,9 +28,13 @@ export async function GET(request: NextRequest) {
     ok: true,
     message: "FitShot Apple Health webhook is active. Use POST with JSON body for sync.",
   });
+  } catch {
+    return internalServerErrorJson();
+  }
 }
 
 export async function POST(request: NextRequest) {
+  try {
   const token = request.nextUrl.searchParams.get("token")?.trim();
   if (!token) {
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
@@ -68,4 +74,7 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ ok: true });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

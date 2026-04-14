@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { prisma } from "@/lib/db";
 
@@ -16,6 +17,7 @@ function requireBotUsername(): string {
  * TELEGRAM_BOT_TOKEN stays server-side only; only the public username is used in URLs.
  */
 export async function POST() {
+  try {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json(
       { error: "Database not configured." },
@@ -52,4 +54,7 @@ export async function POST() {
   const deepLink = `https://t.me/${botUsername}?start=${token}`;
 
   return NextResponse.json({ ok: true, deepLink, token });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

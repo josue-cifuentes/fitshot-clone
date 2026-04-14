@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import {
   getStravaAthleteIdFromCookies,
   getStravaAccessTokenFromCookies,
@@ -18,6 +19,7 @@ import {
  * Identity is always taken from the cookie token — never from the request body — so users cannot affect each other's rows.
  */
 export async function POST() {
+  try {
   const athleteId = await getStravaAthleteIdFromCookies();
   const accessToken = await getStravaAccessTokenFromCookies();
   if (athleteId == null || !accessToken) {
@@ -49,4 +51,7 @@ export async function POST() {
     maxAge: 0,
   });
   return res;
+  } catch {
+    return internalServerErrorJson();
+  }
 }

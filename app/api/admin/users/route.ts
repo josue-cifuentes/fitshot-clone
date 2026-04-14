@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyAdminSession } from "@/lib/admin-auth";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { appleDaysJsonHasData } from "@/lib/apple-health";
 import { profileHasGarminCredentials } from "@/lib/coach-pipeline";
 import { prisma } from "@/lib/db";
@@ -7,6 +8,7 @@ import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  try {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json(
       { error: "Database not configured." },
@@ -44,4 +46,7 @@ export async function GET() {
   }));
 
   return NextResponse.json({ users });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

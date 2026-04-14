@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import {
   parseAppleHealthDaysJson,
   appleDaysJsonHasData,
@@ -30,6 +31,7 @@ function buildTelegramDeepLink(profile: CoachProfile | null): string | null {
 }
 
 export async function GET() {
+  try {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json({ error: "Database not configured." }, { status: 503 });
   }
@@ -124,4 +126,7 @@ export async function GET() {
     },
     lastRecommendationAt: profile?.lastRecommendationAt ?? null,
   });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

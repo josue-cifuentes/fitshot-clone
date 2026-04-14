@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyAdminSession } from "@/lib/admin-auth";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import {
   disconnectServiceForProfile,
   type AdminDisconnectService,
@@ -15,6 +16,7 @@ const SERVICES: AdminDisconnectService[] = [
 ];
 
 export async function POST(request: NextRequest) {
+  try {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json(
       { error: "Database not configured." },
@@ -51,4 +53,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ ok: true });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { prisma } from "@/lib/db";
 import {
@@ -9,6 +10,7 @@ import type { AiTrainingRecommendation } from "@/lib/gemini-coach";
 import { sendTelegramMessage } from "@/lib/telegram-notify";
 
 export async function POST(request: Request) {
+  try {
   if (!process.env.TELEGRAM_BOT_TOKEN) {
     return NextResponse.json(
       { error: "TELEGRAM_BOT_TOKEN not configured." },
@@ -58,4 +60,7 @@ export async function POST(request: Request) {
 
   await notifyProfileIfConfigured(profile, rec);
   return NextResponse.json({ ok: true, text: formatRecommendationTelegram(rec) });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

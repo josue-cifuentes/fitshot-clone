@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import {
   fetchCoachRecoveryContext,
   getStravaAccessFromStoredRefresh,
@@ -49,8 +50,9 @@ const PHOTO_DEFAULT_PROMPT =
   "What do you see? Give me fitness/training advice based on this.";
 
 export async function POST(request: NextRequest) {
+  try {
   if (!verifyWebhookSecret(request)) {
-    return new NextResponse("Unauthorized", { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   if (!process.env.TELEGRAM_BOT_TOKEN) {
@@ -225,4 +227,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json({ ok: true });
+  } catch {
+    return internalServerErrorJson();
+  }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { compileFitshotAppleShortcutBuffer } from "@/lib/apple-health-shortcut";
 import { prisma } from "@/lib/db";
@@ -8,6 +9,7 @@ import { getPublicAppUrl } from "@/lib/public-app-url";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  try {
   if (!process.env.DATABASE_URL) {
     return NextResponse.json(
       { error: "Database not configured." },
@@ -61,8 +63,10 @@ export async function GET() {
         "Cache-Control": "no-store",
       },
     });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Shortcut compile failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch {
+    return internalServerErrorJson();
+  }
+  } catch {
+    return internalServerErrorJson();
   }
 }

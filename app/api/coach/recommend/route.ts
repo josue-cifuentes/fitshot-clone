@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
 import { prisma } from "@/lib/db";
 import {
@@ -9,6 +10,7 @@ import {
 import { fetchStravaAthlete } from "@/lib/strava";
 
 export async function POST() {
+  try {
   if (!process.env.GEMINI_API_KEY) {
     return NextResponse.json(
       { error: "GEMINI_API_KEY is not configured." },
@@ -47,11 +49,9 @@ export async function POST() {
     );
   }
 
-  try {
-    const rec = await generateAndSaveRecommendation(profile, token);
-    return NextResponse.json({ recommendation: rec });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Recommendation failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
+  const rec = await generateAndSaveRecommendation(profile, token);
+  return NextResponse.json({ recommendation: rec });
+  } catch {
+    return internalServerErrorJson();
   }
 }

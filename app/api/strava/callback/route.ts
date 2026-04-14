@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { internalServerErrorJson } from "@/lib/api-internal-error";
 import { encryptSecret } from "@/lib/coach-crypto";
 import { prisma } from "@/lib/db";
 import {
@@ -17,6 +18,7 @@ function appBaseUrl(): string {
 }
 
 export async function GET(request: NextRequest) {
+  try {
   const base = appBaseUrl();
   const connect = (q?: string) =>
     NextResponse.redirect(
@@ -91,4 +93,13 @@ export async function GET(request: NextRequest) {
   });
 
   return res;
+  } catch (e) {
+    console.error("strava callback:", e);
+    try {
+      const base = appBaseUrl();
+      return NextResponse.redirect(`${base}/connect?error=server`);
+    } catch {
+      return internalServerErrorJson();
+    }
+  }
 }
