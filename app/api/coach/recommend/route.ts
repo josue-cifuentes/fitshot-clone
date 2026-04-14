@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { internalServerErrorJson } from "@/lib/api-internal-error";
+import { internalServerErrorJsonLogged } from "@/lib/api-internal-error";
 import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
 import { prisma } from "@/lib/db";
 import {
@@ -51,7 +51,7 @@ export async function POST() {
 
   const rec = await generateAndSaveRecommendation(profile, token);
   return NextResponse.json({ recommendation: rec });
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("POST /api/coach/recommend", e);
   }
 }

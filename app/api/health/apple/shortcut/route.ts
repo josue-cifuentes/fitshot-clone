@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { internalServerErrorJson } from "@/lib/api-internal-error";
+import { internalServerErrorJsonLogged } from "@/lib/api-internal-error";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { compileFitshotAppleShortcutBuffer } from "@/lib/apple-health-shortcut";
 import { prisma } from "@/lib/db";
@@ -63,10 +63,10 @@ export async function GET() {
         "Cache-Control": "no-store",
       },
     });
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("GET /api/health/apple/shortcut (compile)", e);
   }
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("GET /api/health/apple/shortcut", e);
   }
 }

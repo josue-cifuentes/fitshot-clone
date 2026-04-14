@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
-import { internalServerErrorJson } from "@/lib/api-internal-error";
+import { internalServerErrorJsonLogged } from "@/lib/api-internal-error";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { prisma } from "@/lib/db";
 
@@ -54,7 +54,7 @@ export async function POST() {
   const deepLink = `https://t.me/${botUsername}?start=${token}`;
 
   return NextResponse.json({ ok: true, deepLink, token });
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("POST /api/coach/telegram/setup", e);
   }
 }

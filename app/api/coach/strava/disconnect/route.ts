@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { internalServerErrorJson } from "@/lib/api-internal-error";
+import { internalServerErrorJsonLogged } from "@/lib/api-internal-error";
 import {
   getStravaAthleteIdFromCookies,
   getStravaAccessTokenFromCookies,
@@ -51,7 +51,7 @@ export async function POST() {
     maxAge: 0,
   });
   return res;
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("POST /api/coach/strava/disconnect", e);
   }
 }

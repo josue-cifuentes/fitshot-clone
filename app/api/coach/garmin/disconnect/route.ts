@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { internalServerErrorJson } from "@/lib/api-internal-error";
+import { internalServerErrorJsonLogged } from "@/lib/api-internal-error";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { prisma } from "@/lib/db";
 
@@ -31,7 +31,7 @@ export async function POST() {
   });
 
   return NextResponse.json({ ok: true });
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("POST /api/coach/garmin/disconnect", e);
   }
 }

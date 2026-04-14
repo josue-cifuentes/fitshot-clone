@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { GarminConnect } from "@flow-js/garmin-connect";
-import { internalServerErrorJson } from "@/lib/api-internal-error";
+import { internalServerErrorJsonLogged } from "@/lib/api-internal-error";
 import { encryptSecret } from "@/lib/coach-crypto";
 import { getStravaAthleteIdFromCookies } from "@/lib/coach-auth";
 import { encryptGarminTokens } from "@/lib/garmin-client-from-profile";
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ ok: true });
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("POST /api/coach/garmin", e);
   }
 }

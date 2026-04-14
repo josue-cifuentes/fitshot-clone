@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { internalServerErrorJson } from "@/lib/api-internal-error";
+import { internalServerErrorJsonLogged } from "@/lib/api-internal-error";
 import {
   parseAppleHealthDaysJson,
   appleDaysJsonHasData,
@@ -126,7 +126,7 @@ export async function GET() {
     },
     lastRecommendationAt: profile?.lastRecommendationAt ?? null,
   });
-  } catch {
-    return internalServerErrorJson();
+  } catch (e) {
+    return internalServerErrorJsonLogged("GET /api/coach/dashboard", e);
   }
 }
