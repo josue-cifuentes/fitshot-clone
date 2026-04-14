@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     "@prisma/client",
     "prisma",
+    "@prisma/adapter-pg",
+    "pg",
     "@flow-js/garmin-connect",
   ],
 };
