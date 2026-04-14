@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { signInWithStrava } from "./actions";
+import { StravaSignInForm } from "./strava-sign-in-form";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -10,6 +10,11 @@ const errorMessages: Record<string, string> = {
   access_denied: "Strava authorization was cancelled.",
   OAuthAccountNotLinked: "This account could not be linked. Try again.",
   server: "Something went wrong during sign-in. Try again.",
+  Configuration: "Server configuration error. Check NEXTAUTH_URL, NEXTAUTH_SECRET, and Strava credentials.",
+  OAuthSignin: "Could not start Strava sign-in. Check STRAVA_CLIENT_ID / STRAVA_CLIENT_SECRET and Strava app settings.",
+  OAuthCallback: "Strava returned an error after authorization. Try again.",
+  Callback: "Sign-in callback failed. Try again.",
+  Default: "Sign-in failed.",
 };
 
 export default async function LoginPage({
@@ -22,7 +27,9 @@ export default async function LoginPage({
     typeof callbackUrl === "string" && callbackUrl.length > 0
       ? callbackUrl
       : "/coach";
-  const errorMessage = error ? errorMessages[error] ?? "Sign-in failed." : null;
+  const errorMessage = error
+    ? errorMessages[error] ?? errorMessages.Default
+    : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-[#0A0A0A] px-4 py-8 sm:px-6 sm:py-12">
@@ -41,18 +48,15 @@ export default async function LoginPage({
             role="alert"
           >
             {errorMessage}
+            {error && !errorMessages[error] ? (
+              <span className="mt-1 block text-xs text-red-200/70">
+                (code: {error})
+              </span>
+            ) : null}
           </p>
         ) : null}
 
-        <form action={signInWithStrava} className="mt-6 sm:mt-8">
-          <input type="hidden" name="callbackUrl" value={nextPath} />
-          <button
-            type="submit"
-            className="flex min-h-14 w-full items-center justify-center rounded-2xl bg-[#E8FF00] px-5 text-base font-bold text-[#0A0A0A] shadow-lg shadow-[#E8FF00]/15 transition hover:brightness-110 active:scale-[0.99] sm:min-h-16"
-          >
-            Sign in with Strava
-          </button>
-        </form>
+        <StravaSignInForm callbackUrl={nextPath} />
       </main>
     </div>
   );

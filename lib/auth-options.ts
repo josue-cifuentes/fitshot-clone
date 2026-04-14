@@ -5,16 +5,41 @@ import {
   refreshStravaAccessToken,
 } from "@/lib/strava";
 
+function trimEnv(name: string): string | undefined {
+  const v = process.env[name];
+  return typeof v === "string" ? v.trim() : undefined;
+}
+
+/** Help NextAuth resolve the site URL when NEXTAUTH_URL is unset (local dev). */
+if (!process.env.NEXTAUTH_URL) {
+  const pub = trimEnv("NEXT_PUBLIC_APP_URL");
+  if (pub) {
+    process.env.NEXTAUTH_URL = pub.replace(/\/$/, "");
+  }
+}
+
+const stravaClientId = trimEnv("STRAVA_CLIENT_ID");
+const stravaClientSecret = trimEnv("STRAVA_CLIENT_SECRET");
+
+try {
+  console.log("[next-auth] Initializing authOptions", {
+    hasNextAuthUrl: Boolean(trimEnv("NEXTAUTH_URL")),
+    hasNextAuthSecret: Boolean(trimEnv("NEXTAUTH_SECRET")),
+    hasStravaClientId: Boolean(stravaClientId),
+    hasStravaClientSecret: Boolean(stravaClientSecret),
+  });
+} catch (e) {
+  console.error("[next-auth] Error logging auth env diagnostics:", e);
+}
+
 export const authOptions: NextAuthOptions = {
-  secret: process.env.NEXTAUTH_SECRET,
-  pages: {
-    signIn: "/login",
-  },
+  secret: trimEnv("NEXTAUTH_SECRET"),
+  debug: process.env.NODE_ENV === "development",
   session: { strategy: "jwt", maxAge: 30 * 24 * 60 * 60 },
   providers: [
     Strava({
-      clientId: process.env.STRAVA_CLIENT_ID!,
-      clientSecret: process.env.STRAVA_CLIENT_SECRET!,
+      clientId: stravaClientId ?? "",
+      clientSecret: stravaClientSecret ?? "",
       authorization: {
         params: {
           scope: "read,activity:read_all",
