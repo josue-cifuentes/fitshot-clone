@@ -6,11 +6,6 @@ export const metadata: Metadata = {
   robots: "noindex, nofollow",
 };
 
-function safeCallbackUrl(raw: string | undefined): string {
-  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return "/coach";
-  return raw;
-}
-
 const errorMessages: Record<string, string> = {
   access_denied: "Strava authorization was cancelled.",
   OAuthAccountNotLinked: "This account could not be linked. Try again.",
@@ -23,7 +18,10 @@ export default async function LoginPage({
   searchParams: Promise<{ callbackUrl?: string; error?: string }>;
 }) {
   const { callbackUrl, error } = await searchParams;
-  const nextPath = safeCallbackUrl(callbackUrl);
+  const nextPath =
+    typeof callbackUrl === "string" && callbackUrl.length > 0
+      ? callbackUrl
+      : "/coach";
   const errorMessage = error ? errorMessages[error] ?? "Sign-in failed." : null;
 
   return (
@@ -55,13 +53,6 @@ export default async function LoginPage({
             Sign in with Strava
           </button>
         </form>
-
-        <p className="mt-5 text-center text-xs text-[#F5F5F5]/45 sm:mt-6 sm:text-sm">
-          Strava app callback URL must include{" "}
-          <code className="rounded bg-[#F5F5F5]/10 px-1 py-0.5 text-[10px] text-[#F5F5F5]/70">
-            /api/auth/callback/strava
-          </code>
-        </p>
       </main>
     </div>
   );
