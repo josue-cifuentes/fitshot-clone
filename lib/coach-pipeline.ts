@@ -1,19 +1,40 @@
 import type { CoachProfile } from "@prisma/client";
-import { prisma } from "@/lib/db";
+import {
+  appleDaysJsonHasData,
+  parseAppleHealthDaysJson,
+} from "@/lib/apple-health";
 import { decryptSecret, encryptSecret } from "@/lib/coach-crypto";
 import { createGarminClientFromProfile } from "@/lib/garmin-client-from-profile";
 import { fetchGarminRecoveryLastDays } from "@/lib/garmin-recovery";
 import {
-  fetchStravaActivitiesSince,
-  refreshStravaAccessToken,
-} from "@/lib/strava";
-import {
   generateTrainingRecommendation,
   type AiTrainingRecommendation,
 } from "@/lib/gemini-coach";
+import type { RecoveryDayForPrompt } from "@/lib/recovery-prompt";
+import { prisma } from "@/lib/db";
+import {
+  appleDaysToPrompt,
+  garminDaysToPrompt,
+} from "@/lib/recovery-prompt";
+import {
+  fetchStravaActivitiesSince,
+  refreshStravaAccessToken,
+} from "@/lib/strava";
 import { sendTelegramMessage } from "@/lib/telegram-notify";
 
-async function getStravaAccessFromStoredRefresh(
+export function profileHasGarminCredentials(
+  profile: CoachProfile | null | undefined
+): boolean {
+  return Boolean(profile?.garminEmail && profile?.garminPasswordCipher);
+}
+
+export function profileHasAppleHealthData(
+  profile: CoachProfile | null | undefined
+): boolean {
+  return appleDaysJsonHasData(profile?.appleHealthDaysJson);
+}
+
+export async function getStravaAccessFromStoredRefresh(
   profile: CoachProfile
 ): Promise<string | null> {
   if (
@@ -43,21 +64,59 @@ async function getStravaAccessFromStoredRefresh(
   return tok.access_token;
 }
 
-async function computeRecommendation(
+/** Strava (7d) + recovery context for Gemini (training recommendation + Telegram chat). */
+export async function fetchCoachRecoveryContext(
   profile: CoachProfile,
   stravaAccessToken: string
-): Promise<AiTrainingRecommendation> {
+): Promise<{
+  stravaActivities: Awaited<ReturnType<typeof fetchStravaActivitiesSince>>;
+  recoveryDays: RecoveryDayForPrompt[];
+  recoverySource: "garmin" | "apple";
+}> {
   const after = Math.floor(Date.now() / 1000) - 7 * 86400;
   const activities = await fetchStravaActivitiesSince(
     stravaAccessToken,
     after,
     50
   );
-  const gc = await createGarminClientFromProfile(profile);
-  const { days } = await fetchGarminRecoveryLastDays(gc, 7);
-  return generateTrainingRecommendation({
+
+  if (profileHasGarminCredentials(profile)) {
+    const gc = await createGarminClientFromProfile(profile);
+    const { days } = await fetchGarminRecoveryLastDays(gc, 7);
+    return {
+      stravaActivities: activities,
+      recoveryDays: garminDaysToPrompt(days),
+      recoverySource: "garmin",
+    };
+  }
+
+  if (!profileHasAppleHealthData(profile)) {
+    throw new Error(
+      "Connect Garmin or Apple Health and complete the first Health sync."
+    );
+  }
+
+  const appleDays = parseAppleHealthDaysJson(profile.appleHealthDaysJson);
+  const sorted = [...appleDays].sort((a, b) => a.date.localeCompare(b.date));
+  const last7 = sorted.slice(-7);
+
+  return {
     stravaActivities: activities,
-    garminDays: days,
+    recoveryDays: appleDaysToPrompt(last7),
+    recoverySource: "apple",
+  };
+}
+
+async function computeRecommendation(
+  profile: CoachProfile,
+  stravaAccessToken: string
+): Promise<AiTrainingRecommendation> {
+  const ctx = await fetchCoachRecoveryContext(profile, stravaAccessToken);
+  return generateTrainingRecommendation({
+    stravaActivities: ctx.stravaActivities,
+    recoveryDays: ctx.recoveryDays,
+    recoverySource: ctx.recoverySource,
+    athleteName: undefined,
   });
 }
 

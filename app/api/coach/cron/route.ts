@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import {
   notifyProfileIfConfigured,
+  profileHasAppleHealthData,
+  profileHasGarminCredentials,
   runCoachJobForProfile,
 } from "@/lib/coach-pipeline";
 
@@ -25,14 +27,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "GEMINI_API_KEY missing" }, { status: 503 });
   }
 
-  const profiles = await prisma.coachProfile.findMany({
+  const candidates = await prisma.coachProfile.findMany({
     where: {
-      garminEmail: { not: null },
-      garminPasswordCipher: { not: null },
       telegramChatId: { not: null },
       stravaRefreshCipher: { not: null },
     },
   });
+
+  const profiles = candidates.filter(
+    (p) =>
+      profileHasGarminCredentials(p) || profileHasAppleHealthData(p)
+  );
 
   const results: { athleteId: number; ok: boolean; error?: string }[] = [];
 

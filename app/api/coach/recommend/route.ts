@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
 import { prisma } from "@/lib/db";
-import { generateAndSaveRecommendation } from "@/lib/coach-pipeline";
+import {
+  generateAndSaveRecommendation,
+  profileHasAppleHealthData,
+  profileHasGarminCredentials,
+} from "@/lib/coach-pipeline";
 import { fetchStravaAthlete } from "@/lib/strava";
 
 export async function POST() {
@@ -24,9 +28,21 @@ export async function POST() {
   const profile = await prisma.coachProfile.findUnique({
     where: { stravaAthleteId: athlete.id },
   });
-  if (!profile?.garminEmail) {
+  if (!profile) {
     return NextResponse.json(
-      { error: "Connect Garmin first." },
+      { error: "Connect Garmin or set up Apple Health first." },
+      { status: 400 }
+    );
+  }
+  if (
+    !profileHasGarminCredentials(profile) &&
+    !profileHasAppleHealthData(profile)
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          "Connect Garmin, or set up Apple Health and wait for the first webhook sync.",
+      },
       { status: 400 }
     );
   }

@@ -20,12 +20,19 @@ model CoachProfile {
   garminTokensIv        String?
   garminTokensTag       String?
   telegramChatId        String?
+  /// One-time deep-link token for t.me/Bot?start=… account linking.
+  telegramLinkToken     String?   @unique
   lastRecommendationJson String?
   lastRecommendationAt  DateTime?
   /// Encrypted Strava OAuth refresh token (for server/cron without browser cookies).
   stravaRefreshCipher   String?
   stravaRefreshIv       String?
   stravaRefreshTag      String?
+  /// Secret token for Health Auto Export webhook (`/api/health/apple?token=…`).
+  healthExportToken     String?   @unique
+  /// JSON array of daily Apple Health snapshots (last ~14 days, merged by date).
+  appleHealthDaysJson   String?
+  appleHealthLastSyncAt DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 }

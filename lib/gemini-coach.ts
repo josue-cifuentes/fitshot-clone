@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { GarminRecoveryDay } from "./garmin-recovery";
 import type { StravaActivity } from "./strava";
+import type { RecoveryDayForPrompt } from "./recovery-prompt";
 
 export type AiTrainingRecommendation = {
   type: string;
@@ -17,7 +17,8 @@ function requireGeminiKey(): string {
 
 export async function generateTrainingRecommendation(input: {
   stravaActivities: StravaActivity[];
-  garminDays: GarminRecoveryDay[];
+  recoveryDays: RecoveryDayForPrompt[];
+  recoverySource: "garmin" | "apple";
   athleteName?: string;
 }): Promise<AiTrainingRecommendation> {
   const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
@@ -33,32 +34,41 @@ export async function generateTrainingRecommendation(input: {
     avgHr: a.average_heartrate ?? null,
   }));
 
-  const garminSummary = input.garminDays.map((d) => ({
+  const recoverySummary = input.recoveryDays.map((d) => ({
     date: d.date,
     bodyBattery: d.bodyBattery ?? null,
     hrv: d.hrv ?? null,
     hrvStatus: d.hrvStatus ?? null,
     sleepScore: d.sleepScore ?? null,
     trainingReadiness: d.trainingReadiness ?? null,
-    restingHr: d.restingHeartRate ?? null,
+    restingHr: d.restingHr ?? null,
+    sleepDurationMinutes: d.sleepDurationMinutes ?? null,
+    activeEnergyKcal: d.activeEnergyKcal ?? null,
+    steps: d.steps ?? null,
   }));
 
-  const prompt = `You are an endurance coach. Based on the athlete's last Strava sessions and Garmin recovery metrics, recommend ONE training session for TODAY.
+  const sourceLabel =
+    input.recoverySource === "garmin"
+      ? "Garmin Connect"
+      : "Apple Health (Health Auto Export)";
+
+  const prompt = `You are an endurance coach. Based on the athlete's last Strava sessions and recovery metrics from ${sourceLabel}, recommend ONE training session for TODAY.
 
 Athlete: ${input.athleteName ?? "Athlete"}
 
 Strava (recent, newest first):
 ${JSON.stringify(stravaSummary, null, 2)}
 
-Garmin recovery (last days, oldest → newest):
-${JSON.stringify(garminSummary, null, 2)}
+Recovery metrics — ${sourceLabel} (last days, oldest → newest):
+${JSON.stringify(recoverySummary, null, 2)}
 
 Respond with ONLY valid JSON (no markdown) in this exact shape:
 {"type":"string workout category e.g. Easy run, Rest, Cross-train","durationMinutes":number,"intensity":"e.g. Z2 / moderate / easy","reasoning":"2-4 sentences citing recovery metrics"}
 
 Rules:
-- If recovery is poor (low sleep score, low body battery, poor HRV), prefer rest, easy work, or short duration.
+- If recovery is poor (low sleep score or quality, low body battery when present, poor HRV, high fatigue from low sleep duration), prefer rest, easy work, or short duration.
 - If readiness is strong, you can suggest quality or longer endurance.
+- For Apple-only data, use HRV, resting HR, sleep duration/quality, steps, and active energy as recovery signals.
 - durationMinutes between 0 (rest) and 180.`;
 
   const res = await model.generateContent(prompt);
@@ -80,4 +90,68 @@ Rules:
     intensity: parsed.intensity,
     reasoning: parsed.reasoning,
   };
+}
+
+/** Conversational reply for Telegram; plain text, no structured JSON. */
+export async function generateTelegramCoachChatReply(input: {
+  userMessage: string;
+  stravaActivities: StravaActivity[];
+  recoveryDays: RecoveryDayForPrompt[];
+  recoverySource: "garmin" | "apple";
+  athleteName?: string;
+}): Promise<string> {
+  const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
+    model: "gemini-1.5-flash",
+  });
+
+  const stravaSummary = input.stravaActivities.slice(0, 30).map((a) => ({
+    name: a.name,
+    type: a.type,
+    date: a.start_date,
+    distanceKm: Math.round((a.distance / 1000) * 100) / 100,
+    movingMin: Math.round(a.moving_time / 60),
+    avgHr: a.average_heartrate ?? null,
+  }));
+
+  const recoverySummary = input.recoveryDays.map((d) => ({
+    date: d.date,
+    bodyBattery: d.bodyBattery ?? null,
+    hrv: d.hrv ?? null,
+    hrvStatus: d.hrvStatus ?? null,
+    sleepScore: d.sleepScore ?? null,
+    trainingReadiness: d.trainingReadiness ?? null,
+    restingHr: d.restingHr ?? null,
+    sleepDurationMinutes: d.sleepDurationMinutes ?? null,
+    activeEnergyKcal: d.activeEnergyKcal ?? null,
+    steps: d.steps ?? null,
+  }));
+
+  const sourceLabel =
+    input.recoverySource === "garmin"
+      ? "Garmin Connect"
+      : "Apple Health (Health Auto Export)";
+
+  const prompt = `You are a supportive endurance and recovery coach replying on Telegram.
+
+Athlete: ${input.athleteName ?? "Athlete"}
+
+Their message:
+"""${input.userMessage.replace(/"""/g, "'")}"""
+
+Use ONLY the data below. If they ask for something not covered (e.g. routes, power zones without data), say what you can infer from recovery and load, or that the data isn't available in FitShot yet.
+
+Strava (last ~7 days, newest first):
+${JSON.stringify(stravaSummary, null, 2)}
+
+Recovery — ${sourceLabel} (oldest → newest):
+${JSON.stringify(recoverySummary, null, 2)}
+
+Reply in plain language only. No JSON, no markdown code fences. Be concise but helpful (under 3500 characters). Reference specific metrics when useful.`;
+
+  const res = await model.generateContent(prompt);
+  let text = res.response.text().trim();
+  if (text.length > 3900) {
+    text = `${text.slice(0, 3880)}…`;
+  }
+  return text;
 }

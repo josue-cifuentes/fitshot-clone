@@ -1,16 +1,33 @@
 import { NextResponse } from "next/server";
 import {
+  parseAppleHealthDaysJson,
+  appleDaysJsonHasData,
+  type AppleHealthDay,
+} from "@/lib/apple-health";
+import {
   getStravaAccessTokenFromCookies,
   getStravaAthleteIdFromCookies,
 } from "@/lib/coach-auth";
+import {
+  profileHasGarminCredentials,
+} from "@/lib/coach-pipeline";
 import { prisma } from "@/lib/db";
 import { createGarminClientFromProfile } from "@/lib/garmin-client-from-profile";
 import { fetchGarminRecoveryLastDays } from "@/lib/garmin-recovery";
+import type { AiTrainingRecommendation } from "@/lib/gemini-coach";
+import { getPublicAppUrl } from "@/lib/public-app-url";
 import {
   fetchStravaActivitiesSince,
   fetchStravaAthlete,
 } from "@/lib/strava";
-import type { AiTrainingRecommendation } from "@/lib/gemini-coach";
+import type { CoachProfile } from "@prisma/client";
+
+function buildTelegramDeepLink(profile: CoachProfile | null): string | null {
+  const bot = process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, "").trim();
+  const tok = profile?.telegramLinkToken?.trim();
+  if (!bot || !tok) return null;
+  return `https://t.me/${bot}?start=${encodeURIComponent(tok)}`;
+}
 
 export async function GET() {
   if (!process.env.DATABASE_URL) {
@@ -36,7 +53,7 @@ export async function GET() {
     | { error: string }
     | null = null;
 
-  if (profile?.garminEmail && profile.garminPasswordCipher) {
+  if (profile && profileHasGarminCredentials(profile)) {
     try {
       const gc = await createGarminClientFromProfile(profile);
       const data = await fetchGarminRecoveryLastDays(gc, 7);
@@ -47,6 +64,27 @@ export async function GET() {
       };
     }
   }
+
+  const baseUrl = getPublicAppUrl();
+  const healthExportToken = profile?.healthExportToken?.trim();
+  const appleWebhookUrl =
+    baseUrl && healthExportToken
+      ? `${baseUrl}/api/health/apple?token=${encodeURIComponent(healthExportToken)}`
+      : null;
+
+  let appleDays: AppleHealthDay[] = [];
+  if (profile?.appleHealthDaysJson) {
+    appleDays = parseAppleHealthDaysJson(profile.appleHealthDaysJson);
+  }
+
+  const appleHasData = profile ? appleDaysJsonHasData(profile.appleHealthDaysJson) : false;
+  const garminOk =
+    garmin !== null && garmin !== undefined && "days" in garmin && !("error" in garmin);
+  const recoveryPrimary: "garmin" | "apple" | null = garminOk
+    ? "garmin"
+    : appleHasData
+      ? "apple"
+      : null;
 
   let recommendation: AiTrainingRecommendation | null = null;
   if (profile?.lastRecommendationJson) {
@@ -63,9 +101,25 @@ export async function GET() {
     athlete: { id: athlete.id, username: athlete.username },
     activities,
     garmin,
+    recoveryPrimary,
+    appleHealth: {
+      webhookUrl: appleWebhookUrl,
+      lastSyncAt: profile?.appleHealthLastSyncAt?.toISOString() ?? null,
+      hasToken: Boolean(healthExportToken),
+      hasData: appleHasData,
+      waitingForSync: Boolean(healthExportToken) && !appleHasData,
+      days: appleDays,
+    },
     recommendation,
+    telegram: {
+      deepLink: buildTelegramDeepLink(profile),
+      isLinked: Boolean(profile?.telegramChatId?.trim()),
+      botConfigured: Boolean(
+        process.env.TELEGRAM_BOT_USERNAME?.replace(/^@/, "").trim()
+      ),
+    },
     profile: {
-      hasGarmin: Boolean(profile?.garminEmail),
+      hasGarmin: profileHasGarminCredentials(profile),
       telegramChatId: profile?.telegramChatId ?? "",
     },
     lastRecommendationAt: profile?.lastRecommendationAt ?? null,
