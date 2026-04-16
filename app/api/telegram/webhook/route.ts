@@ -2,17 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { identifyFoodItems, calculateCaloriesForItems } from "@/lib/gemini-calories";
 
-const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
+const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 async function sendMessage(chatId: string | number, text: string) {
+  console.log(`[Telegram] Sending message to ${chatId}. Token starts with: ${BOT_TOKEN.slice(0, 5)}...`);
   try {
-    await fetch(`${TELEGRAM_API}/sendMessage`, {
+    const res = await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: "Markdown" }),
     });
+    
+    const body = await res.json();
+    console.log(`[Telegram] sendMessage response status: ${res.status}`);
+    console.log(`[Telegram] sendMessage response body:`, JSON.stringify(body, null, 2));
+
+    if (!res.ok) {
+      console.error(`[Telegram] Error sending message: ${body.description || 'Unknown error'}`);
+    }
   } catch (e) {
-    console.error("Failed to send telegram message:", e);
+    console.error("[Telegram] Failed to send telegram message:", e);
   }
 }
 
@@ -22,7 +32,7 @@ async function getTelegramFile(fileId: string) {
   if (!data.ok) throw new Error(`Telegram getFile failed: ${JSON.stringify(data)}`);
   
   const filePath = data.result.file_path;
-  const fileRes = await fetch(`https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${filePath}`);
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`);
   if (!fileRes.ok) throw new Error(`Telegram file download failed: ${fileRes.status}`);
   
   const buffer = await fileRes.arrayBuffer();
@@ -46,19 +56,29 @@ function calculateTDEE(weight: number, height: number, age: number, activityLeve
 
 export async function POST(req: NextRequest) {
   // Always return 200 to Telegram immediately to prevent retries
-  // We'll process the update in the background
-  const update = await req.json();
+  let update: any;
+  try {
+    update = await req.json();
+  } catch (e) {
+    return NextResponse.json({ ok: true });
+  }
+  
   console.log("Telegram Update:", JSON.stringify(update, null, 2));
 
   // Process in background
   (async () => {
     try {
       const message = update.message;
-      if (!message) return;
+      if (!message || !message.chat?.id) return;
 
       const chatId = String(message.chat.id);
       const text = message.text?.trim();
       const photo = message.photo;
+
+      // IMMEDIATE CONFIRMATION for text messages
+      if (text) {
+        await sendMessage(chatId, `Got it: "${text}"`);
+      }
 
       // Find or create state
       let state = await prisma.telegramState.findUnique({ where: { telegramChatId: chatId } });
