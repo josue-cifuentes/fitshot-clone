@@ -25,19 +25,29 @@ async function sendMessage(chatId: string | number, text: string) {
 }
 
 async function getTelegramFile(fileId: string) {
-  const res = await fetch(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(`Telegram getFile failed: ${JSON.stringify(data)}`);
-  
-  const filePath = data.result.file_path;
-  const fileRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`);
-  if (!fileRes.ok) throw new Error(`Telegram file download failed: ${fileRes.status}`);
-  
-  const buffer = await fileRes.arrayBuffer();
-  return {
-    base64: Buffer.from(buffer).toString("base64"),
-    mimeType: "image/jpeg",
-  };
+  console.log("Step 4: Fetching file from Telegram for fileId:", fileId);
+  try {
+    const res = await fetch(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
+    const data = await res.json();
+    if (!data.ok) throw new Error(`Telegram getFile failed: ${JSON.stringify(data)}`);
+    
+    const filePath = data.result.file_path;
+    console.log("Step 4.1: File path retrieved:", filePath);
+    
+    const fileRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`);
+    if (!fileRes.ok) throw new Error(`Telegram file download failed: ${fileRes.status}`);
+    
+    const buffer = await fileRes.arrayBuffer();
+    console.log("Step 4.2: File downloaded, buffer size:", buffer.byteLength);
+    
+    return {
+      base64: Buffer.from(buffer).toString("base64"),
+      mimeType: "image/jpeg",
+    };
+  } catch (e) {
+    console.error("CRASH in getTelegramFile:", e);
+    throw e;
+  }
 }
 
 function calculateTDEE(weight: number, height: number, age: number, activityLevel: string): { bmr: number; tdee: number } {
@@ -77,21 +87,48 @@ export async function POST(req: NextRequest) {
 
       console.log("Processing message from chat:", chatId);
 
-      // Find or create state
-      let state = await prisma.telegramState.findUnique({ where: { telegramChatId: chatId } });
+      // Step 1: Looking up user
+      console.log("Step 1: Looking up user/state for chat:", chatId);
+      let state;
+      try {
+        state = await prisma.telegramState.findUnique({ where: { telegramChatId: chatId } });
+      } catch (e) {
+        console.error("CRASH during prisma lookup:", e);
+        throw e;
+      }
+
+      // Step 2: User found/not found
       if (!state) {
-        console.log("Creating new state for chat:", chatId);
-        state = await prisma.telegramState.create({ data: { telegramChatId: chatId, state: "IDLE" } });
+        console.log("Step 2: User state not found, creating IDLE state");
+        try {
+          state = await prisma.telegramState.create({ data: { telegramChatId: chatId, state: "IDLE" } });
+        } catch (e) {
+          console.error("CRASH during prisma create:", e);
+          throw e;
+        }
+      } else {
+        console.log("Step 2: User state found:", state.state);
+      }
+
+      // Check if user is linked to a profile
+      if (!state.userProfileId && !text?.startsWith("/start")) {
+        console.log("Step 2.1: User not linked to Strava profile");
+        await sendMessage(chatId, "Welcome! Please connect your account at https://fitshot-clone.vercel.app first.");
+        return;
       }
 
       // 1. Handle Photo (Food Analysis)
       if (photo) {
+        console.log("Step 3: Detected photo message");
         const bestPhoto = photo[photo.length - 1];
         try {
           const { base64, mimeType } = await getTelegramFile(bestPhoto.file_id);
           await sendMessage(chatId, "Analyzing your meal... 🧐");
           
+          console.log("Step 5: Calling Gemini identifyFoodItems");
           const items = await identifyFoodItems(base64, mimeType);
+          console.log("Step 5.1: Gemini responded with items:", items);
+
           if (items.length === 0) {
             await sendMessage(chatId, "I couldn't identify any food in that photo. Try another one!");
             return;
@@ -107,7 +144,7 @@ export async function POST(req: NextRequest) {
 
           await sendMessage(chatId, `I found: *${items.join(", ")}*.\n\nPlease tell me the portion size or weight for each one (e.g., "100g chicken, 1 cup rice").`);
         } catch (e: any) {
-          console.error("Photo analysis error:", e);
+          console.error("CRASH in photo handling:", e);
           const errorMsg = e.name === "AbortError" 
             ? "Analysis took too long, please try again." 
             : `Sorry, something went wrong during analysis: ${e.message}`;
@@ -118,9 +155,11 @@ export async function POST(req: NextRequest) {
 
       // 2. Handle Text Responses
       if (text) {
+        console.log("Step 3: Detected text message:", text);
         if (text.startsWith("/start")) {
           const stravaId = text.split(" ")[1];
           if (stravaId) {
+            console.log("Step 3.1: Linking Strava ID:", stravaId);
             const profile = await prisma.userProfile.findUnique({ where: { id: stravaId } });
             if (profile) {
               await prisma.telegramState.update({
@@ -129,6 +168,8 @@ export async function POST(req: NextRequest) {
               });
               await sendMessage(chatId, `Connected! ✅ Welcome ${profile.stravaDisplayName}. Send me a photo of your meal to start tracking.`);
               return;
+            } else {
+              console.log("Step 3.2: Profile not found for ID:", stravaId);
             }
           }
           await sendMessage(chatId, "Welcome to FitShot! Send me a food photo to track your calories.");
@@ -143,7 +184,10 @@ export async function POST(req: NextRequest) {
               const itemsWithSizes = context.items.map((item: string) => ({ item, size: text }));
 
               await sendMessage(chatId, "Calculating calories... 🔢");
+              console.log("Step 5: Calling Gemini calculateCaloriesForItems");
               const results = await calculateCaloriesForItems(itemsWithSizes);
+              console.log("Step 5.1: Gemini responded with results:", results);
+              
               const total = results.reduce((sum, r) => sum + r.calories, 0);
 
               // Send reply immediately
@@ -160,7 +204,7 @@ export async function POST(req: NextRequest) {
                     description: results.map(r => r.item).join(", "),
                     itemsJson: JSON.stringify(results),
                   }
-                }).catch(err => console.error("DB Write Error:", err));
+                }).catch(err => console.error("CRASH during DB Write:", err));
               }
 
               await prisma.telegramState.update({
@@ -168,7 +212,7 @@ export async function POST(req: NextRequest) {
                 data: { state: "IDLE", context: null },
               });
             } catch (e: any) {
-              console.error("Calorie calculation error:", e);
+              console.error("CRASH in calorie calculation:", e);
               const errorMsg = e.name === "AbortError" 
                 ? "Calculation took too long, please try again." 
                 : `Sorry, I couldn't calculate the calories: ${e.message}`;
