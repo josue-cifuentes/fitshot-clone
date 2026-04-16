@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import Link from "next/link";
 import { STRAVA_ACCESS_TOKEN_COOKIE } from "@/lib/strava";
 
 export default async function Home() {
