@@ -1,28 +1,12 @@
-import { cookies } from "next/headers";
-import { randomBytes } from "crypto";
-import { 
-  STRAVA_OAUTH_STATE_COOKIE,
-  buildStravaAuthorizationUrl 
-} from "@/lib/strava";
+"use client";
 
-export default async function LoginPage(props: {
-  searchParams: Promise<{ error?: string }>;
-}) {
-  const searchParams = await props.searchParams;
-  const error = searchParams.error;
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-  const state = randomBytes(16).toString("hex");
-  const authUrl = buildStravaAuthorizationUrl(state);
-
-  // Set the state cookie for CSRF protection
-  const cookieStore = await cookies();
-  cookieStore.set(STRAVA_OAUTH_STATE_COOKIE, state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 600, // 10 minutes
-    path: "/",
-  });
+function LoginContent() {
+  const searchParams = useSearchParams();
+  const error = searchParams.get("error");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-[#0A0A0A] px-4 py-8 sm:px-6 sm:py-12">
@@ -43,13 +27,26 @@ export default async function LoginPage(props: {
           </p>
         )}
 
-        <a
-          href={authUrl}
+        <Link
+          href="/api/auth/strava/login"
+          prefetch={false}
           className="mt-8 flex min-h-14 w-full items-center justify-center rounded-2xl bg-[#E8FF00] px-5 text-base font-bold text-[#0A0A0A] shadow-lg shadow-[#E8FF00]/15 transition hover:brightness-110 active:scale-[0.99] sm:min-h-16"
         >
           Connect with Strava
-        </a>
+        </Link>
       </main>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-[#0A0A0A]">
+        <div className="text-[#F5F5F5]/50">Loading...</div>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   );
 }
