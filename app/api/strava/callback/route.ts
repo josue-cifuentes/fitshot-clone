@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
       const displayName =
         [athlete.firstname, athlete.lastname].filter(Boolean).join(" ").trim() ||
         athlete.username;
-      await prisma.coachProfile.upsert({
+      await prisma.userProfile.upsert({
         where: { stravaAthleteId: athlete.id },
         create: {
           stravaAthleteId: athlete.id,

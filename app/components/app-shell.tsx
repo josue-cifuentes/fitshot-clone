@@ -14,7 +14,7 @@ const nav = [
   { href: "/dashboard", label: "Home", Icon: IconHome },
   { href: "/activities", label: "Activities", Icon: IconActivities },
   { href: "/editor", label: "Editor", Icon: IconEditor },
-  { href: "/coach", label: "Coach", Icon: IconCoach },
+  { href: "/calories", label: "Calories", Icon: IconCoach },
 ] as const;
 
 export function AppShell({
