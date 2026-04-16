@@ -50,25 +50,31 @@ export default function AppleHealthPage() {
               </button>
             </>
           ) : (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-widest text-[#F5F5F5]/50">Your Webhook URL</label>
-                <div className="bg-[#1A1A1A] border border-[#F5F5F5]/10 rounded-xl px-4 py-3 text-[10px] font-mono break-all text-[#E8FF00]">
-                  {webhookUrl}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase tracking-widest text-[#F5F5F5]/50">Your Webhook URL</label>
+                  <div className="bg-[#1A1A1A] border border-[#F5F5F5]/10 rounded-xl px-4 py-3 text-[10px] font-mono break-all text-[#E8FF00]">
+                    {webhookUrl}
+                  </div>
                 </div>
+                <p className="text-xs text-[#F5F5F5]/50 leading-relaxed">
+                  1. Download the shortcut below.<br />
+                  2. Open it in the Shortcuts app.<br />
+                  3. It's pre-configured with your unique URL.
+                </p>
+                <a
+                  href="/api/apple-health/download-shortcut"
+                  className="block w-full py-4 rounded-2xl bg-[#E8FF00] text-[#0A0A0A] text-center font-bold text-sm transition hover:brightness-110"
+                >
+                  Download Shortcut
+                </a>
+                <button
+                  onClick={() => router.push("/dashboard")}
+                  className="w-full py-4 rounded-2xl bg-[#F5F5F5]/10 text-[#F5F5F5] font-bold text-sm transition hover:bg-[#F5F5F5]/20"
+                >
+                  Done
+                </button>
               </div>
-              <p className="text-xs text-[#F5F5F5]/50 leading-relaxed">
-                1. Copy this URL.<br />
-                2. Download the FitShot iOS Shortcut.<br />
-                3. Paste this URL into the Shortcut settings.
-              </p>
-              <button
-                onClick={() => router.push("/dashboard")}
-                className="w-full py-4 rounded-2xl bg-[#F5F5F5]/10 text-[#F5F5F5] font-bold text-sm transition hover:bg-[#F5F5F5]/20"
-              >
-                Done
-              </button>
-            </div>
           )}
 
           {error && <p className="text-xs text-red-400">{error}</p>}
