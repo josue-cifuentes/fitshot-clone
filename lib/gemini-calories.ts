@@ -26,7 +26,7 @@ export async function identifyFoodItems(imageBase64: string, mimeType: string): 
 
   const text = result.response.text();
   try {
-    const match = text.match(/\[.*\]/s);
+    const match = text.match(/\[[\s\S]*\]/);
     return match ? JSON.parse(match[0]) : [];
   } catch (e) {
     console.error("Failed to parse food items:", text);
@@ -46,7 +46,7 @@ export async function calculateCaloriesForItems(itemsWithSizes: { item: string; 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
   try {
-    const match = text.match(/\[.*\]/s);
+    const match = text.match(/\[[\s\S]*\]/);
     return match ? JSON.parse(match[0]) : [];
   } catch (e) {
     console.error("Failed to parse calories:", text);
