@@ -9,6 +9,9 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const { type, calories, description, userProfileId } = body;
+    if (!userProfileId || typeof userProfileId !== "string") {
+      return NextResponse.json({ error: "Missing userProfileId" }, { status: 400 });
+    }
 
     const entry = await prisma.calorieEntry.create({
       data: {
@@ -16,6 +19,7 @@ export async function POST(request: Request) {
         calories,
         description,
         userProfileId,
+        telegramChatId: null,
       },
     });
 

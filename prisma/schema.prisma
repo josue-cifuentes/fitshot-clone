@@ -39,32 +39,39 @@ model UserProfile {
 
 /// Calorie tracking entries for the Weekly Calorie Tracker.
 model CalorieEntry {
-  id            String      @id @default(cuid())
-  userProfileId String
-  userProfile   UserProfile @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
-  
+  id              String       @id @default(cuid())
+  userProfileId   String?
+  userProfile     UserProfile? @relation(fields: [userProfileId], references: [id], onDelete: Cascade)
+
+  /// Telegram chat id when the entry was logged from the bot (works without a linked Strava profile).
+  telegramChatId String?
+
   /// Type of meal: breakfast, lunch, dinner, snack
   type          String
   calories      Int
   description   String?
-  
+
   /// JSON string of food items and their individual calories
   itemsJson     String?
-  
+
   /// Date of the entry
   date          DateTime    @default(now())
-  
+
   createdAt     DateTime    @default(now())
 
   @@index([userProfileId, date])
+  @@index([telegramChatId, date])
 }
 
 model TelegramSession {
-  id        String   @id @default(cuid())
-  chatId    String   @unique
-  state     String   @default("idle") // "idle" | "waiting_for_portions"
-  foodItems Json? // food item names identified from the photo
+  id         String   @id @default(cuid())
+  chatId     String   @unique
+  state      String   @default("idle") // "idle" | "meal_logging"
+  foodItems  Json?
   /// Stored demographics for BMR/TDEE (heightCm, weightKg, age, sex, activityLevel, etc.)
-  userData  Json?
-  updatedAt DateTime @updatedAt
+  userData   Json?
+  mealType   String?
+  /// "meal_type" | "portions" — next step in the meal logging flow
+  waitingFor String?
+  updatedAt  DateTime @updatedAt
 }

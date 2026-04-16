@@ -4,13 +4,19 @@ import {
   weekRangeUtcContaining,
 } from "@/lib/guatemala-week";
 
-export async function mealLogMetricsForUser(
+/** All calories logged from this Telegram chat (with or without a linked Strava profile). */
+export async function mealLogMetricsForTelegramChat(
   prisma: PrismaClient,
-  userProfileId: string,
+  chatIdStr: string,
   atUtc: Date
 ): Promise<{ mealNumber: number; dailyTotal: number; weeklyTotal: number }> {
   const entries = await prisma.calorieEntry.findMany({
-    where: { userProfileId },
+    where: {
+      OR: [
+        { telegramChatId: chatIdStr },
+        { userProfile: { telegramChatId: chatIdStr } },
+      ],
+    },
     select: { date: true, calories: true },
   });
 

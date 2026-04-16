@@ -41,10 +41,10 @@ function sheetConfigured(): boolean {
 
 function getSheetsClient() {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL!.trim();
-  const key = process.env.GOOGLE_PRIVATE_KEY!.replace(/\\n/g, "\n");
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n") ?? "";
   const auth = new google.auth.JWT({
     email,
-    key,
+    key: privateKey,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
   return google.sheets({ version: "v4", auth });
