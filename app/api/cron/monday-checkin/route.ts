@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { ensureWeekSheetExists } from "@/lib/googleSheets";
+import { weekSheetTitleForDate } from "@/lib/guatemala-week";
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
@@ -23,6 +25,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    await ensureWeekSheetExists(weekSheetTitleForDate(new Date()));
+
     const profiles = await prisma.userProfile.findMany({
       where: { telegramChatId: { not: null } },
     });

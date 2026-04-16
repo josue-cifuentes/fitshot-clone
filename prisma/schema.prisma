@@ -64,5 +64,7 @@ model TelegramSession {
   chatId    String   @unique
   state     String   @default("idle") // "idle" | "waiting_for_portions"
   foodItems Json? // food item names identified from the photo
+  /// Stored demographics for BMR/TDEE (heightCm, weightKg, age, sex, activityLevel, etc.)
+  userData  Json?
   updatedAt DateTime @updatedAt
 }

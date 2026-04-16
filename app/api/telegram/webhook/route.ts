@@ -3,8 +3,12 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   calculateCaloriesForItems,
+  extractUserDemographicsFromMessage,
   identifyFoodItems,
+  nutritionAssistantReply,
 } from "@/lib/gemini-calories";
+import { logMealToSheet, sheetDateDayFromUtc } from "@/lib/googleSheets";
+import { mealLogMetricsForUser } from "@/lib/meal-metrics";
 
 const TELEGRAM_SEND = (token: string) =>
   `https://api.telegram.org/bot${token}/sendMessage`;
@@ -57,6 +61,17 @@ async function downloadTelegramPhoto(
 function foodItemsFromJson(json: unknown): string[] {
   if (!Array.isArray(json)) return [];
   return json.filter((x): x is string => typeof x === "string");
+}
+
+function parseUserData(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) };
+  }
+  return {};
+}
+
+function fmtCal(n: number): string {
+  return `${n.toLocaleString("en-US")} cal`;
 }
 
 export async function POST(req: NextRequest) {
@@ -127,11 +142,16 @@ export async function POST(req: NextRequest) {
         );
       }
     } else if (text) {
-      const session = await prisma.telegramSession.findUnique({
+      let session = await prisma.telegramSession.findUnique({
         where: { chatId: chatIdStr },
       });
+      if (!session) {
+        session = await prisma.telegramSession.create({
+          data: { chatId: chatIdStr, state: "idle" },
+        });
+      }
 
-      if (session?.state === "waiting_for_portions") {
+      if (session.state === "waiting_for_portions") {
         const items = foodItemsFromJson(session.foodItems);
         if (items.length === 0) {
           await prisma.telegramSession.update({
@@ -156,39 +176,87 @@ export async function POST(req: NextRequest) {
             data: { state: "idle", foodItems: Prisma.JsonNull },
           });
 
-          await telegramReply(
-            chatId,
-            `Here's your meal:\n${summary}\n\nTotal: ${total} kcal`,
-            token
-          );
+          const foodsLabel = results.map((r) => `${r.item}`).join("; ");
+          const loggedAt = new Date();
+          const { date: sheetDate, day: sheetDay } = sheetDateDayFromUtc(loggedAt);
 
-          void (async () => {
-            try {
-              const profile = await prisma.userProfile.findFirst({
-                where: { telegramChatId: chatIdStr },
+          let dailyDisplay = 0;
+          let weeklyDisplay = 0;
+          let sheetsSynced = false;
+          let persisted = false;
+
+          try {
+            const profile = await prisma.userProfile.findFirst({
+              where: { telegramChatId: chatIdStr },
+            });
+            if (profile && total > 0) {
+              await prisma.calorieEntry.create({
+                data: {
+                  userProfileId: profile.id,
+                  type: "meal",
+                  calories: total,
+                  description: foodsLabel,
+                  itemsJson: JSON.stringify(results),
+                },
               });
-              if (profile && total > 0) {
-                await prisma.calorieEntry.create({
-                  data: {
-                    userProfileId: profile.id,
-                    type: "meal",
-                    calories: total,
-                    description: results.map((r) => r.item).join(", "),
-                    itemsJson: JSON.stringify(results),
-                  },
+
+              const metrics = await mealLogMetricsForUser(
+                prisma,
+                profile.id,
+                loggedAt
+              );
+              dailyDisplay = metrics.dailyTotal;
+              weeklyDisplay = metrics.weeklyTotal;
+              persisted = true;
+
+              try {
+                const sheet = await logMealToSheet({
+                  date: sheetDate,
+                  day: sheetDay,
+                  mealNumber: metrics.mealNumber,
+                  foods: foodsLabel,
+                  calories: total,
                 });
+                if (sheet.sheetSynced) {
+                  dailyDisplay = sheet.dailyTotal;
+                  weeklyDisplay = sheet.weeklyTotal;
+                  sheetsSynced = true;
+                }
+              } catch (e) {
+                console.error("[telegram] Google Sheets:", e);
               }
-            } catch (e) {
-              console.error("[telegram] persist calories (non-blocking):", e);
             }
-          })();
+          } catch (e) {
+            console.error("[telegram] persist meal:", e);
+          }
+
+          const intro = `Here's your meal:\n${summary}\n\nTotal: ${total} kcal`;
+          const tail = persisted
+            ? `✅ Logged! ${fmtCal(total)} added. Daily total: ${fmtCal(dailyDisplay)} | Weekly total: ${fmtCal(weeklyDisplay)}.${sheetsSynced ? " Synced to Google Sheets 📊" : ""}`
+            : total <= 0
+              ? "Nothing to log (0 kcal)."
+              : "This chat is not linked to a FitShot profile, so the meal was not saved.";
+          await telegramReply(chatId, `${intro}\n\n${tail}`, token);
         }
       } else {
-        await telegramReply(
-          chatId,
-          "Send me a food photo to log your calories 📸",
-          token
-        );
+        const userData = parseUserData(session.userData);
+        const reply = await nutritionAssistantReply(text, userData);
+        await telegramReply(chatId, reply, token);
+
+        void (async () => {
+          try {
+            const delta = await extractUserDemographicsFromMessage(text);
+            if (Object.keys(delta).length > 0) {
+              const merged = { ...userData, ...delta };
+              await prisma.telegramSession.update({
+                where: { chatId: chatIdStr },
+                data: { userData: merged as Prisma.InputJsonValue },
+              });
+            }
+          } catch (e) {
+            console.error("[telegram] userData merge (non-blocking):", e);
+          }
+        })();
       }
     }
   } catch (e) {
