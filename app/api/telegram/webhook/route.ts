@@ -91,6 +91,30 @@ function labelMealType(t: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+/** Ready for a new meal photo or general assistant (not waiting on meal_type / portions). */
+function isAssistantTurn(waitingFor: string | null | undefined): boolean {
+  return waitingFor == null || waitingFor === "" || waitingFor === "idle";
+}
+
+function logSessionUpdated(
+  label: string,
+  row: {
+    waitingFor: string | null;
+    state: string;
+    mealType: string | null;
+    foodItems: Prisma.JsonValue | null;
+  }
+) {
+  const foodCount = Array.isArray(row.foodItems) ? row.foodItems.length : 0;
+  console.log("Session updated to:", {
+    label,
+    waitingFor: row.waitingFor,
+    state: row.state,
+    mealType: row.mealType,
+    foodItemsCount: foodCount,
+  });
+}
+
 export async function POST(req: NextRequest) {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) {
@@ -121,7 +145,23 @@ export async function POST(req: NextRequest) {
   const photos = message.photo;
 
   try {
+    let session = await prisma.telegramSession.upsert({
+      where: { chatId: chatIdStr },
+      update: {},
+      create: { chatId: chatIdStr, state: "idle" },
+    });
+    console.log("Session loaded:", JSON.stringify(session));
+
     if (photos && photos.length > 0) {
+      if (!isAssistantTurn(session.waitingFor)) {
+        await telegramReply(
+          chatId,
+          "Finish the current meal step with a text reply first (meal type or portions).",
+          token
+        );
+        return NextResponse.json({ ok: true });
+      }
+
       await telegramReply(chatId, "📸 Analyzing your food...", token);
 
       const best = photos[photos.length - 1];
@@ -129,44 +169,32 @@ export async function POST(req: NextRequest) {
       const items = await identifyFoodItems(base64, mimeType);
 
       if (items.length === 0) {
-        await prisma.telegramSession.upsert({
+        session = await prisma.telegramSession.update({
           where: { chatId: chatIdStr },
-          create: {
-            chatId: chatIdStr,
-            state: "idle",
-            foodItems: Prisma.JsonNull,
-            mealType: null,
-            waitingFor: null,
-          },
-          update: {
+          data: {
             state: "idle",
             foodItems: Prisma.JsonNull,
             mealType: null,
             waitingFor: null,
           },
         });
+        logSessionUpdated("photo_no_food", session);
         await telegramReply(
           chatId,
           "I couldn't spot food in that image. Send another photo 📸",
           token
         );
       } else {
-        await prisma.telegramSession.upsert({
+        session = await prisma.telegramSession.update({
           where: { chatId: chatIdStr },
-          create: {
-            chatId: chatIdStr,
-            state: "meal_logging",
-            foodItems: items,
-            mealType: null,
-            waitingFor: "meal_type",
-          },
-          update: {
+          data: {
             state: "meal_logging",
             foodItems: items,
             mealType: null,
             waitingFor: "meal_type",
           },
         });
+        logSessionUpdated("photo_identified_meal_type", session);
         await telegramReply(
           chatId,
           `I see: ${items.join(", ")}.\n\nWhat meal is this? Reply with: Breakfast, Lunch, Dinner, or Snack`,
@@ -174,19 +202,10 @@ export async function POST(req: NextRequest) {
         );
       }
     } else if (text) {
-      let session = await prisma.telegramSession.findUnique({
-        where: { chatId: chatIdStr },
-      });
-      if (!session) {
-        session = await prisma.telegramSession.create({
-          data: { chatId: chatIdStr, state: "idle" },
-        });
-      }
-
       if (session.waitingFor === "portions") {
         const items = foodItemsFromJson(session.foodItems);
         if (items.length === 0 || !session.mealType) {
-          await prisma.telegramSession.update({
+          session = await prisma.telegramSession.update({
             where: { chatId: chatIdStr },
             data: {
               state: "idle",
@@ -195,12 +214,14 @@ export async function POST(req: NextRequest) {
               waitingFor: null,
             },
           });
+          logSessionUpdated("recovery_portions_missing_data", session);
           await telegramReply(
             chatId,
             "Something went wrong with the meal flow. Send a new photo 📸",
             token
           );
         } else {
+          const mealTypeForReply = session.mealType;
           const itemsWithSizes = items.map((item) => ({ item, size: text }));
           const results = await calculateCaloriesForItems(itemsWithSizes);
           const total = results.reduce((sum, r) => sum + r.calories, 0);
@@ -266,7 +287,7 @@ export async function POST(req: NextRequest) {
             console.error("[telegram] persist meal:", e);
           }
 
-          await prisma.telegramSession.update({
+          session = await prisma.telegramSession.update({
             where: { chatId: chatIdStr },
             data: {
               state: "idle",
@@ -275,8 +296,9 @@ export async function POST(req: NextRequest) {
               waitingFor: null,
             },
           });
+          logSessionUpdated("meal_flow_complete", session);
 
-          const intro = `Here's your ${labelMealType(session.mealType)}:\n${summary}\n\nTotal: ${total} kcal`;
+          const intro = `Here's your ${labelMealType(mealTypeForReply ?? "meal")}:\n${summary}\n\nTotal: ${total} kcal`;
           const tail = persisted
             ? `✅ Logged! ${fmtCal(total)} added. Daily total: ${fmtCal(dailyDisplay)} | Weekly total: ${fmtCal(weeklyDisplay)}.${sheetsSynced ? " Synced to Google Sheets 📊" : ""}`
             : total <= 0
@@ -295,7 +317,7 @@ export async function POST(req: NextRequest) {
         } else {
           const items = foodItemsFromJson(session.foodItems);
           if (items.length === 0) {
-            await prisma.telegramSession.update({
+            session = await prisma.telegramSession.update({
               where: { chatId: chatIdStr },
               data: {
                 state: "idle",
@@ -304,19 +326,21 @@ export async function POST(req: NextRequest) {
                 waitingFor: null,
               },
             });
+            logSessionUpdated("recovery_meal_type_no_items", session);
             await telegramReply(
               chatId,
               "Food list was lost. Send a new photo 📸",
               token
             );
           } else {
-            await prisma.telegramSession.update({
+            session = await prisma.telegramSession.update({
               where: { chatId: chatIdStr },
               data: {
                 mealType: parsed,
                 waitingFor: "portions",
               },
             });
+            logSessionUpdated("meal_type_saved_portions", session);
             await telegramReply(
               chatId,
               `Got it — ${labelMealType(parsed)}.\n\nHow much of each item did you eat? (e.g. 1 cup rice, 2 eggs)`,
@@ -324,7 +348,7 @@ export async function POST(req: NextRequest) {
             );
           }
         }
-      } else if (session.state === "idle") {
+      } else if (isAssistantTurn(session.waitingFor)) {
         const userData = parseUserData(session.userData);
         const reply = await nutritionAssistantReply(text, userData);
         await telegramReply(chatId, reply, token);
@@ -334,28 +358,20 @@ export async function POST(req: NextRequest) {
             const delta = await extractUserDemographicsFromMessage(text);
             if (Object.keys(delta).length > 0) {
               const merged = { ...userData, ...delta };
-              await prisma.telegramSession.update({
+              const row = await prisma.telegramSession.update({
                 where: { chatId: chatIdStr },
                 data: { userData: merged as Prisma.InputJsonValue },
               });
+              logSessionUpdated("userData_merge", row);
             }
           } catch (e) {
             console.error("[telegram] userData merge (non-blocking):", e);
           }
         })();
       } else {
-        await prisma.telegramSession.update({
-          where: { chatId: chatIdStr },
-          data: {
-            state: "idle",
-            waitingFor: null,
-            mealType: null,
-            foodItems: Prisma.JsonNull,
-          },
-        });
         await telegramReply(
           chatId,
-          "Send a food photo to log a meal 📸",
+          "Send a food photo to log a meal, or continue with a text reply for the current step.",
           token
         );
       }
