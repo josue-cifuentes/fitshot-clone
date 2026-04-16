@@ -33,35 +33,32 @@ export async function GET(request: NextRequest) {
     const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
     for (const user of users) {
-      const state = await prisma.telegramState.findFirst({
-        where: { userProfileId: user.id },
-      });
+      const chatId = user.telegramChatId?.trim();
+      if (!chatId) continue;
 
-      if (state?.telegramChatId) {
-        const total = user.calorieEntries.reduce((sum, e) => sum + e.calories, 0);
-        const goal = user.targetCalories || 2000;
-        const diff = goal - total;
+      const total = user.calorieEntries.reduce((sum, e) => sum + e.calories, 0);
+      const goal = user.targetCalories || 2000;
+      const diff = goal - total;
 
-        let message = `🌙 *Daily Calorie Summary*\n\n`;
-        message += `Total Consumed: ${total} kcal\n`;
-        message += `Daily Goal: ${goal} kcal\n\n`;
+      let message = `🌙 *Daily Calorie Summary*\n\n`;
+      message += `Total Consumed: ${total} kcal\n`;
+      message += `Daily Goal: ${goal} kcal\n\n`;
 
-        if (diff >= 0) {
-          message += `Great job! You finished the day with ${diff} kcal remaining to hit your deficit goal. ✅`;
-        } else {
-          message += `You went over your daily goal by ${Math.abs(diff)} kcal. Tomorrow is a new day! 💪`;
-        }
-
-        await fetch(`${TELEGRAM_API}/sendMessage`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
-            chat_id: state.telegramChatId, 
-            text: message,
-            parse_mode: "Markdown"
-          }),
-        });
+      if (diff >= 0) {
+        message += `Great job! You finished the day with ${diff} kcal remaining to hit your deficit goal. ✅`;
+      } else {
+        message += `You went over your daily goal by ${Math.abs(diff)} kcal. Tomorrow is a new day! 💪`;
       }
+
+      await fetch(`${TELEGRAM_API}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: message,
+          parse_mode: "Markdown",
+        }),
+      });
     }
     
     return NextResponse.json({ ok: true, processed: users.length });

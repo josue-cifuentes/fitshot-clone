@@ -23,23 +23,21 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const states = await prisma.telegramState.findMany({
-      where: { telegramChatId: { not: "" } },
+    const profiles = await prisma.userProfile.findMany({
+      where: { telegramChatId: { not: null } },
     });
 
-    for (const state of states) {
-      await prisma.telegramState.update({
-        where: { id: state.id },
-        data: { state: "AWAITING_DEFICIT_GOAL" },
-      });
+    for (const p of profiles) {
+      const chatId = p.telegramChatId?.trim();
+      if (!chatId) continue;
 
       await sendMessage(
-        state.telegramChatId, 
+        chatId,
         "🗓 *Monday Check-in!*\n\nLet's set your goals for the week. What is your daily calorie deficit goal for this week? (e.g., 500)"
       );
     }
     
-    return NextResponse.json({ ok: true, processed: states.length });
+    return NextResponse.json({ ok: true, processed: profiles.length });
   } catch (err) {
     console.error("Monday check-in cron failed:", err);
     return new NextResponse('Internal Server Error', { status: 500 });

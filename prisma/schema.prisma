@@ -59,11 +59,10 @@ model CalorieEntry {
   @@index([userProfileId, date])
 }
 
-model TelegramState {
-  id             String   @id @default(cuid())
-  telegramChatId String   @unique
-  userProfileId  String?
-  state          String   // e.g., "AWAITING_SIZES", "AWAITING_DEFICIT", etc.
-  context        String?  @db.Text // JSON context for the current flow
-  updatedAt      DateTime @updatedAt
+model TelegramSession {
+  id        String   @id @default(cuid())
+  chatId    String   @unique
+  state     String   @default("idle") // "idle" | "waiting_for_portions"
+  foodItems Json? // food item names identified from the photo
+  updatedAt DateTime @updatedAt
 }
