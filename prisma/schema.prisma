@@ -24,6 +24,16 @@ model UserProfile {
   updatedAt DateTime @updatedAt
 
   calorieEntries CalorieEntry[]
+  
+  // New fields for calorie tracking
+  weightKg          Float?
+  heightCm          Float?
+  age               Int?
+  activityLevel     String?
+  dailyDeficitGoal  Int?
+  bmr               Float?
+  tdee              Float?
+  targetCalories    Int?
 }
 
 /// Calorie tracking entries for the Weekly Calorie Tracker.
@@ -37,10 +47,22 @@ model CalorieEntry {
   calories      Int
   description   String?
   
+  /// JSON string of food items and their individual calories
+  itemsJson     String?
+  
   /// Date of the entry
   date          DateTime    @default(now())
   
   createdAt     DateTime    @default(now())
 
   @@index([userProfileId, date])
+}
+
+model TelegramState {
+  id             String   @id @default(cuid())
+  telegramChatId String   @unique
+  userProfileId  String?
+  state          String   // e.g., "AWAITING_SIZES", "AWAITING_DEFICIT", etc.
+  context        String?  @db.Text // JSON context for the current flow
+  updatedAt      DateTime @updatedAt
 }
