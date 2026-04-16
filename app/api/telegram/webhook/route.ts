@@ -7,12 +7,20 @@ import {
 import {
   generateTelegramCoachChatReply,
   generateTelegramCoachPhotoReply,
+  analyzeMealPhoto,
+  calculateFinalCalories,
 } from "@/lib/gemini-coach";
 import { prisma } from "@/lib/db";
 import {
   appendTelegramCoachExchange,
   getTelegramCoachMemory,
 } from "@/lib/telegram-coach-memory";
+import {
+  createMealLog,
+  getDailyCalorieSummary,
+  getPendingMealLog,
+  updateMealLog,
+} from "@/lib/meal-tracker";
 import { downloadTelegramFileAsBase64 } from "@/lib/telegram-files";
 import { sendTelegramMessage } from "@/lib/telegram-notify";
 import { fetchStravaAthlete } from "@/lib/strava";
@@ -167,10 +175,44 @@ export async function POST(request: NextRequest) {
     if (hasPhoto && photos?.length) {
       const best = photos[photos.length - 1];
       const caption = msg.caption?.trim();
+      
+      const { base64, mimeType } = await downloadTelegramFileAsBase64(best.file_id);
+      
+      // Try meal analysis first
+      const mealAnalysis = await analyzeMealPhoto({
+        imageBase64: base64,
+        imageMimeType: mimeType,
+        userMessage: caption,
+      });
+
+      if (mealAnalysis.isMeal) {
+        await createMealLog({
+          coachProfileId: profile.id,
+          imageFileId: best.file_id,
+          description: mealAnalysis.description,
+        });
+
+        let reply = `I see a meal: ${mealAnalysis.description}.\n\n`;
+        if (mealAnalysis.followUpQuestions.length > 0) {
+          reply += `To be more accurate, ${mealAnalysis.followUpQuestions.join(" ")}`;
+        } else {
+          // If no follow up, just use the initial estimates
+          await updateMealLog(profile.id, {
+            calories: mealAnalysis.calories,
+            protein: mealAnalysis.protein,
+            carbs: mealAnalysis.carbs,
+            fat: mealAnalysis.fat,
+          });
+          const summary = await getDailyCalorieSummary(profile.id);
+          reply += `Estimated: ${mealAnalysis.calories} kcal. Your total today: ${summary.totalCalories} kcal.`;
+        }
+        
+        await sendTelegramMessage(chatId, reply);
+        return NextResponse.json({ ok: true });
+      }
+
+      // Fallback to fitness coach if not a meal
       const userQ = caption || PHOTO_DEFAULT_PROMPT;
-      const { base64, mimeType } = await downloadTelegramFileAsBase64(
-        best.file_id
-      );
       const reply = await generateTelegramCoachPhotoReply({
         userMessage: userQ,
         imageBase64: base64,
@@ -191,6 +233,30 @@ export async function POST(request: NextRequest) {
     }
 
     if (text.length > 0) {
+      // Check for pending meal log follow-up
+      const pendingMeal = await getPendingMealLog(profile.id);
+      if (pendingMeal) {
+        const final = await calculateFinalCalories({
+          mealDescription: pendingMeal.description || "",
+          userResponse: text,
+        });
+
+        await updateMealLog(pendingMeal.id, {
+          calories: final.calories,
+          protein: final.protein,
+          carbs: final.carbs,
+          fat: final.fat,
+        });
+
+        const summary = await getDailyCalorieSummary(profile.id);
+        const deficitGoal = 500;
+        // This is a simplified deficit calculation for the demo
+        const reply = `Got it. That adds ${final.calories} kcal (${final.note}).\n\nTotal today: ${summary.totalCalories} kcal. Keep pushing for your ${deficitGoal} kcal deficit!`;
+        
+        await sendTelegramMessage(chatId, reply);
+        return NextResponse.json({ ok: true });
+      }
+
       const reply = await generateTelegramCoachChatReply({
         userMessage: text,
         conversationHistory,

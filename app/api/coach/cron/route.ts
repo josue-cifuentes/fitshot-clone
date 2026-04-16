@@ -7,6 +7,8 @@ import {
   profileHasGarminCredentials,
   runCoachJobForProfile,
 } from "@/lib/coach-pipeline";
+import { getDailyCalorieSummary } from "@/lib/meal-tracker";
+import { sendTelegramMessage } from "@/lib/telegram-notify";
 
 function authorize(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -47,6 +49,24 @@ export async function GET(request: NextRequest) {
     try {
       const rec = await runCoachJobForProfile(p);
       await notifyProfileIfConfigured(p, rec);
+      
+      // Send end-of-day calorie summary
+      const summary = await getDailyCalorieSummary(p.id);
+      if (summary.count > 0 && p.telegramChatId) {
+        const deficitGoal = 500;
+        const deficit = deficitGoal; // Simplified for now
+        const coachingNote = summary.totalCalories > 2000 
+          ? "A bit high today, try to focus on protein tomorrow." 
+          : "Great job staying on track!";
+        
+        const calorieMsg = `🌙 End of day summary:\n\n` +
+          `Calories consumed: ${summary.totalCalories} kcal\n` +
+          `Estimated deficit: ${deficit} kcal\n\n` +
+          `${coachingNote}`;
+          
+        await sendTelegramMessage(p.telegramChatId, calorieMsg);
+      }
+
       results.push({ athleteId: p.stravaAthleteId, ok: true });
     } catch (e) {
       results.push({

@@ -11,8 +11,7 @@ import {
 } from "./nav-icons";
 
 const nav = [
-  { href: "/", label: "Home", Icon: IconHome },
-  { href: "/login", label: "Connect", Icon: IconLink },
+  { href: "/dashboard", label: "Home", Icon: IconHome },
   { href: "/activities", label: "Activities", Icon: IconActivities },
   { href: "/editor", label: "Editor", Icon: IconEditor },
   { href: "/coach", label: "Coach", Icon: IconCoach },

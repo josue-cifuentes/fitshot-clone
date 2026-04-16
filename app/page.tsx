@@ -24,10 +24,10 @@ export default async function Home() {
         <div className="flex flex-col gap-3 sm:gap-4">
           {connected ? (
             <Link
-              href="/editor"
+              href="/dashboard"
               className="flex min-h-14 items-center justify-center rounded-2xl bg-[#E8FF00] px-6 text-base font-bold text-[#0A0A0A] shadow-lg shadow-[#E8FF00]/15 transition hover:brightness-110 active:scale-[0.99] sm:min-h-16 sm:text-lg"
             >
-              Open editor
+              Open dashboard
             </Link>
           ) : (
             <Link

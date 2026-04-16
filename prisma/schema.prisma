@@ -41,6 +41,26 @@ model CoachProfile {
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   telegramMessages      TelegramCoachMessage[]
+  mealLogs              MealLog[]
+  instagramAccessToken  String?
+  instagramUserId       String?
+  instagramUsername     String?
+}
+
+model MealLog {
+  id             String       @id @default(cuid())
+  coachProfileId String
+  coachProfile   CoachProfile @relation(fields: [coachProfileId], references: [id], onDelete: Cascade)
+  imageFileId    String?
+  description    String?      @db.Text
+  calories       Int?
+  protein        Float?
+  carbs          Float?
+  fat            Float?
+  isMealPhoto    Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  @@index([coachProfileId, createdAt])
 }
 
 /// Last N Telegram coach exchanges per linked profile (user + assistant rows; capped in app).

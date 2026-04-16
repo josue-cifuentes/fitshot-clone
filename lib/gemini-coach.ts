@@ -234,3 +234,87 @@ Describe what matters in the image, then advise.`;
   ]);
   return trimTelegramReply(res.response.text());
 }
+
+export type MealAnalysis = {
+  isMeal: boolean;
+  description: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  followUpQuestions: string[];
+};
+
+export async function analyzeMealPhoto(input: {
+  imageBase64: string;
+  imageMimeType: string;
+  userMessage?: string;
+}): Promise<MealAnalysis> {
+  const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
+    model: TELEGRAM_FLASH_MODEL,
+    generationConfig: { ...TELEGRAM_GENERATION, temperature: 0.2 },
+  });
+
+  const prompt = `You are a nutrition expert. Analyze this photo of a meal.
+  
+  If it's NOT a photo of food/meal, respond with isMeal: false.
+  If it IS a meal, estimate the calories, protein, carbs, and fat.
+  Also, provide a short description of what you see.
+  Crucially, if you need more details to be accurate (like portion sizes, specific ingredients not visible, or ounces), provide 1-3 short follow-up questions.
+
+  Respond ONLY with valid JSON in this exact shape:
+  {
+    "isMeal": boolean,
+    "description": "string",
+    "calories": number,
+    "protein": number,
+    "carbs": number,
+    "fat": number,
+    "followUpQuestions": ["string"]
+  }`;
+
+  const res = await model.generateContent([
+    prompt,
+    {
+      inlineData: {
+        mimeType: input.imageMimeType,
+        data: input.imageBase64,
+      },
+    },
+  ]);
+
+  const text = res.response.text().trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  const raw = jsonMatch ? jsonMatch[0] : text;
+  return JSON.parse(raw) as MealAnalysis;
+}
+
+export async function calculateFinalCalories(input: {
+  mealDescription: string;
+  userResponse: string;
+}): Promise<{ calories: number; protein: number; carbs: number; fat: number; note: string }> {
+  const model = new GoogleGenerativeAI(requireGeminiKey()).getGenerativeModel({
+    model: TELEGRAM_FLASH_MODEL,
+    generationConfig: { ...TELEGRAM_GENERATION, temperature: 0.1 },
+  });
+
+  const prompt = `Based on the initial meal description and the user's follow-up details about portions/sizes, calculate the final estimated nutritional values.
+  
+  Initial Description: ${input.mealDescription}
+  User Details: ${input.userResponse}
+
+  Respond ONLY with valid JSON:
+  {
+    "calories": number,
+    "protein": number,
+    "carbs": number,
+    "fat": number,
+    "note": "short 1-sentence explanation"
+  }`;
+
+  const res = await model.generateContent(prompt);
+  const text = res.response.text().trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  const raw = jsonMatch ? jsonMatch[0] : text;
+  return JSON.parse(raw);
+}

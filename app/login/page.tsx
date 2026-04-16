@@ -26,7 +26,7 @@ export default async function LoginPage({
   const nextPath =
     typeof callbackUrl === "string" && callbackUrl.length > 0
       ? callbackUrl
-      : "/coach";
+      : "/dashboard";
   const errorMessage = error
     ? errorMessages[error] ?? errorMessages.Default
     : null;
