@@ -14,23 +14,25 @@ export async function identifyFoodItems(imageBase64: string, mimeType: string): 
 
   const prompt = "Identify all individual food items in this image. Return ONLY a JSON array of strings, e.g. [\"grilled chicken breast\", \"steamed broccoli\", \"brown rice\"]. If no food is found, return [].";
 
-  const result = await model.generateContent([
-    prompt,
-    {
-      inlineData: {
-        data: imageBase64,
-        mimeType,
-      },
-    },
-  ]);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-  const text = result.response.text();
   try {
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          data: imageBase64,
+          mimeType,
+        },
+      },
+    ], { signal: controller.signal });
+
+    const text = result.response.text();
     const match = text.match(/\[[\s\S]*\]/);
     return match ? JSON.parse(match[0]) : [];
-  } catch (e) {
-    console.error("Failed to parse food items:", text);
-    return [];
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -43,13 +45,15 @@ export async function calculateCaloriesForItems(itemsWithSizes: { item: string; 
   
   Return ONLY a JSON array of objects with "item" and "calories" (integer) properties.`;
 
-  const result = await model.generateContent(prompt);
-  const text = result.response.text();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
   try {
+    const result = await model.generateContent(prompt, { signal: controller.signal });
+    const text = result.response.text();
     const match = text.match(/\[[\s\S]*\]/);
     return match ? JSON.parse(match[0]) : [];
-  } catch (e) {
-    console.error("Failed to parse calories:", text);
-    return [];
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
