@@ -28,7 +28,7 @@ export async function GET() {
     const webhookUrl = `${baseUrl}/api/health/apple?token=${profile.healthExportToken}`;
     const buffer = compileFitshotAppleShortcutBuffer(webhookUrl);
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       headers: {
         "Content-Type": "application/octet-stream",
         "Content-Disposition": 'attachment; filename="FitShot-Apple-Health.shortcut"',
