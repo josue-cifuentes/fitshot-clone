@@ -7,7 +7,7 @@ import {
   identifyFoodItems,
   nutritionAssistantReply,
 } from "@/lib/gemini-calories";
-import { logMealToSheet, sheetDateDayFromUtc } from "@/lib/googleSheets";
+import { type MealSheetLogInput, logMealToSheet, sheetDateDayFromUtc } from "@/lib/googleSheets";
 import { mealLogMetricsForTelegramChat } from "@/lib/meal-metrics";
 
 const TELEGRAM_SEND = (token: string) =>
@@ -235,8 +235,8 @@ export async function POST(req: NextRequest) {
 
           let dailyDisplay = 0;
           let weeklyDisplay = 0;
-          let sheetsSynced = false;
           let persisted = false;
+          let sheetPayload: MealSheetLogInput | null = null;
 
           try {
             if (total > 0) {
@@ -264,24 +264,13 @@ export async function POST(req: NextRequest) {
               weeklyDisplay = metrics.weeklyTotal;
               persisted = true;
 
-              const sheetPayload = {
+              sheetPayload = {
                 date: sheetDate,
                 day: sheetDay,
                 mealNumber: metrics.mealNumber,
                 foods: foodsLabel,
                 calories: total,
               };
-              console.log("Logging to sheets:", sheetPayload);
-              try {
-                const sheet = await logMealToSheet(sheetPayload);
-                if (sheet.sheetSynced) {
-                  dailyDisplay = sheet.dailyTotal;
-                  weeklyDisplay = sheet.weeklyTotal;
-                  sheetsSynced = true;
-                }
-              } catch (error) {
-                console.error("Sheets error:", error);
-              }
             }
           } catch (e) {
             console.error("[telegram] persist meal:", e);
@@ -300,11 +289,21 @@ export async function POST(req: NextRequest) {
 
           const intro = `Here's your ${labelMealType(mealTypeForReply ?? "meal")}:\n${summary}\n\nTotal: ${total} kcal`;
           const tail = persisted
-            ? `✅ Logged! ${fmtCal(total)} added. Daily total: ${fmtCal(dailyDisplay)} | Weekly total: ${fmtCal(weeklyDisplay)}.${sheetsSynced ? " Synced to Google Sheets 📊" : ""}`
+            ? `✅ Logged! ${fmtCal(total)} added. Daily total: ${fmtCal(dailyDisplay)} | Weekly total: ${fmtCal(weeklyDisplay)}.`
             : total <= 0
               ? "Nothing to log (0 kcal)."
               : "Could not save this meal. Please try again.";
           await telegramReply(chatId, `${intro}\n\n${tail}`, token);
+
+          if (sheetPayload) {
+            void (async () => {
+              try {
+                await logMealToSheet(sheetPayload);
+              } catch {
+                /* Errors logged in lib/googleSheets.ts — do not surface to user */
+              }
+            })();
+          }
         }
       } else if (session.waitingFor === "meal_type") {
         const parsed = parseMealTypeReply(text);

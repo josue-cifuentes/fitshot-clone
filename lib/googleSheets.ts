@@ -39,7 +39,14 @@ function sheetConfigured(): boolean {
   );
 }
 
+function logSheetsEnv(): void {
+  console.log("Sheet ID:", process.env.GOOGLE_SHEET_ID);
+  console.log("Service account email:", process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
+  console.log("Private key exists:", !!process.env.GOOGLE_PRIVATE_KEY);
+}
+
 function getSheetsClient() {
+  logSheetsEnv();
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL!.trim();
   const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n") ?? "";
   const auth = new google.auth.JWT({
@@ -127,69 +134,74 @@ export async function logMealToSheet(data: MealSheetLogInput): Promise<LogMealSh
     return { dailyTotal: 0, weeklyTotal: 0, sheetSynced: false };
   }
 
-  const spreadsheetId = process.env.GOOGLE_SHEET_ID!.trim();
-  const tabTitle = tabTitleForRowDate(data.date);
-  await ensureWeekSheetExists(tabTitle);
+  try {
+    const spreadsheetId = process.env.GOOGLE_SHEET_ID!.trim();
+    const tabTitle = tabTitleForRowDate(data.date);
+    await ensureWeekSheetExists(tabTitle);
 
-  const sheets = getSheetsClient();
-  const q = escapeSheetTitle(tabTitle);
+    const sheets = getSheetsClient();
+    const q = escapeSheetTitle(tabTitle);
 
-  const newRow = [
-    data.date,
-    data.day,
-    String(data.mealNumber),
-    data.foods,
-    String(data.calories),
-    "",
-    "",
-  ];
+    const newRow = [
+      data.date,
+      data.day,
+      String(data.mealNumber),
+      data.foods,
+      String(data.calories),
+      "",
+      "",
+    ];
 
-  await sheets.spreadsheets.values.append({
-    spreadsheetId,
-    range: `${q}!A:G`,
-    valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: { values: [newRow] },
-  });
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${q}!A:G`,
+      valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
+      requestBody: { values: [newRow] },
+    });
 
-  const read = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${q}!A2:E2000`,
-  });
+    const read = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${q}!A2:E2000`,
+    });
 
-  const rows = read.data.values ?? [];
-  if (rows.length === 0) {
-    return { dailyTotal: 0, weeklyTotal: 0, sheetSynced: true };
+    const rows = read.data.values ?? [];
+    if (rows.length === 0) {
+      return { dailyTotal: 0, weeklyTotal: 0, sheetSynced: true };
+    }
+
+    const dailyByKey = new Map<string, number>();
+    let weekly = 0;
+    for (const r of rows) {
+      const dateCell = r[0] != null ? String(r[0]) : "";
+      const cal = parseCalories(r[4]);
+      weekly += cal;
+      const key = normalizeDateKey(dateCell);
+      dailyByKey.set(key, (dailyByKey.get(key) ?? 0) + cal);
+    }
+
+    const fg: string[][] = rows.map((r) => {
+      const dateCell = r[0] != null ? String(r[0]) : "";
+      const key = normalizeDateKey(dateCell);
+      const d = dailyByKey.get(key) ?? 0;
+      return [String(d), String(weekly)];
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${q}!F2:G${1 + rows.length}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: fg },
+    });
+
+    const rowDateKey = normalizeDateKey(data.date);
+    const dailyTotal = dailyByKey.get(rowDateKey) ?? 0;
+
+    return { dailyTotal, weeklyTotal: weekly, sheetSynced: true };
+  } catch (error: any) {
+    console.error("Google Sheets full error:", error?.message, error?.response?.data);
+    throw error;
   }
-
-  const dailyByKey = new Map<string, number>();
-  let weekly = 0;
-  for (const r of rows) {
-    const dateCell = r[0] != null ? String(r[0]) : "";
-    const cal = parseCalories(r[4]);
-    weekly += cal;
-    const key = normalizeDateKey(dateCell);
-    dailyByKey.set(key, (dailyByKey.get(key) ?? 0) + cal);
-  }
-
-  const fg: string[][] = rows.map((r) => {
-    const dateCell = r[0] != null ? String(r[0]) : "";
-    const key = normalizeDateKey(dateCell);
-    const d = dailyByKey.get(key) ?? 0;
-    return [String(d), String(weekly)];
-  });
-
-  await sheets.spreadsheets.values.update({
-    spreadsheetId,
-    range: `${q}!F2:G${1 + rows.length}`,
-    valueInputOption: "USER_ENTERED",
-    requestBody: { values: fg },
-  });
-
-  const rowDateKey = normalizeDateKey(data.date);
-  const dailyTotal = dailyByKey.get(rowDateKey) ?? 0;
-
-  return { dailyTotal, weeklyTotal: weekly, sheetSynced: true };
 }
 
 /** For webhook copy: format `date` / `day` from a UTC instant in Guatemala. */

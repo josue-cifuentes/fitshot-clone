@@ -25,7 +25,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    await ensureWeekSheetExists(weekSheetTitleForDate(new Date()));
+    try {
+      await ensureWeekSheetExists(weekSheetTitleForDate(new Date()));
+    } catch (error: unknown) {
+      const err = error as { message?: string; response?: { data?: unknown } };
+      console.error("Google Sheets full error:", err?.message, err?.response?.data);
+    }
 
     const profiles = await prisma.userProfile.findMany({
       where: { telegramChatId: { not: null } },
