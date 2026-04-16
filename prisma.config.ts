@@ -7,7 +7,6 @@ import ws from "ws";
 neonConfig.webSocketConstructor = ws;
 
 export default defineConfig({
-  earlyAccess: true,
   schema: path.join("prisma", "schema.prisma"),
   migrate: {
     async adapter() {
