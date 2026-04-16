@@ -38,10 +38,7 @@ export function AppShell({
       >
         <ul className="mx-auto flex max-w-lg items-stretch justify-around gap-1 px-2 pt-2">
           {nav.map(({ href, label, Icon }) => {
-            const active =
-              href === "/"
-                ? pathname === "/"
-                : pathname === href || pathname.startsWith(`${href}/`);
+            const active = pathname === href || pathname.startsWith(href + "/");
             return (
               <li key={href} className="min-w-0 flex-1">
                 <Link
