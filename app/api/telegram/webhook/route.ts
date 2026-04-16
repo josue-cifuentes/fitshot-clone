@@ -50,15 +50,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  let update: { message?: { chat?: { id: number }; text?: string; photo?: { file_id: string }[] } };
+  let body: { message?: { chat?: { id: number }; text?: string; photo?: { file_id: string }[] } };
   try {
-    update = await req.json();
+    body = await req.json();
   } catch {
     return NextResponse.json({ ok: true });
   }
 
-  const message = update.message;
-  const chatId = message?.chat?.id;
+  const { message } = body;
+  if (!message) {
+    return NextResponse.json({ ok: true });
+  }
+
+  const chatId = message.chat?.id;
   if (chatId == null) {
     return NextResponse.json({ ok: true });
   }
