@@ -1,35 +1,22 @@
 import { cookies } from "next/headers";
+import { randomBytes } from "crypto";
 import { 
-  STRAVA_ACCESS_TOKEN_COOKIE, 
   STRAVA_OAUTH_STATE_COOKIE,
   buildStravaAuthorizationUrl 
 } from "@/lib/strava";
-import { randomBytes } from "node:crypto";
 
-const errorMessages: Record<string, string> = {
-  access_denied: "Strava authorization was cancelled.",
-  invalid_state: "Invalid session state. Please try again.",
-  token_exchange: "Failed to exchange authorization code. Try again.",
-  token_expired: "Your session has expired. Please connect again.",
-  server: "Something went wrong. Please try again later.",
-  Default: "Connection failed. Please try again.",
-};
-
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+export default async function LoginPage(props: {
+  searchParams: Promise<{ error?: string }>;
 }) {
-  const { error } = await searchParams;
-  const errorMessage = error
-    ? errorMessages[error] ?? errorMessages.Default
-    : null;
+  const searchParams = await props.searchParams;
+  const error = searchParams.error;
 
   const state = randomBytes(16).toString("hex");
   const authUrl = buildStravaAuthorizationUrl(state);
 
   // Set the state cookie for CSRF protection
-  (await cookies()).set(STRAVA_OAUTH_STATE_COOKIE, state, {
+  const cookieStore = await cookies();
+  cookieStore.set(STRAVA_OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
@@ -47,14 +34,14 @@ export default async function LoginPage({
           Connect your Strava account to get started with FitShot.
         </p>
 
-        {errorMessage ? (
+        {error && (
           <p
             className="mt-4 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2.5 text-sm text-red-200"
             role="alert"
           >
-            {errorMessage}
+            Connection failed. Please try again.
           </p>
-        ) : null}
+        )}
 
         <a
           href={authUrl}
