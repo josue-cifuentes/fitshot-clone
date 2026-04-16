@@ -1,6 +1,9 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const GEMINI_MODEL = "gemini-2.0-flash";
+/** Vision / photo analysis */
+const GEMINI_FLASH = "gemini-2.5-flash";
+/** Text-only conversation */
+const GEMINI_FLASH_LITE = "gemini-2.5-flash-lite";
 
 function requireGeminiKey(): string {
   const k = process.env.GEMINI_API_KEY;
@@ -10,7 +13,7 @@ function requireGeminiKey(): string {
 
 export async function identifyFoodItems(imageBase64: string, mimeType: string): Promise<string[]> {
   const genAI = new GoogleGenerativeAI(requireGeminiKey());
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const model = genAI.getGenerativeModel({ model: GEMINI_FLASH });
 
   const prompt = "Identify all individual food items in this image. Return ONLY a JSON array of strings, e.g. [\"grilled chicken breast\", \"steamed broccoli\", \"brown rice\"]. If no food is found, return [].";
 
@@ -42,7 +45,7 @@ export async function analyzeFoodPhotoForTelegram(
   mimeType: string
 ): Promise<{ text: string; estimatedTotalKcal: number | null }> {
   const genAI = new GoogleGenerativeAI(requireGeminiKey());
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const model = genAI.getGenerativeModel({ model: GEMINI_FLASH });
 
   const prompt = `You are a nutrition assistant. Look at this food photo.
 Describe what you see briefly (2–4 short sentences).
@@ -83,9 +86,38 @@ Respond with ONLY valid JSON, no markdown:
   }
 }
 
+/** Short Telegram reply for plain text (no images). */
+export async function generateTelegramTextReply(userMessage: string): Promise<string> {
+  const genAI = new GoogleGenerativeAI(requireGeminiKey());
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_FLASH_LITE,
+    generationConfig: { maxOutputTokens: 400, temperature: 0.4 },
+  });
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  try {
+    const prompt = `You are FitShot's friendly nutrition assistant on Telegram.
+The user cannot send images in this turn — they sent text only.
+Reply in 2–4 short sentences, plain text only (no markdown).
+Encourage sending a food photo for calorie estimates. Answer briefly if they asked something simple about calories, portions, or healthy eating.
+If they only said hi or thanks, be warm and remind them they can send a meal photo.
+
+User message:
+"""${userMessage.replace(/"""/g, "'").slice(0, 2000)}"""`;
+
+    const result = await model.generateContent(prompt, { signal: controller.signal });
+    const out = result.response.text().trim();
+    return out.slice(0, 3500) || "Send me a food photo anytime and I'll estimate the calories 🍽️";
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function calculateCaloriesForItems(itemsWithSizes: { item: string; size: string }[]): Promise<{ item: string; calories: number }[]> {
   const genAI = new GoogleGenerativeAI(requireGeminiKey());
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  const model = genAI.getGenerativeModel({ model: GEMINI_FLASH_LITE });
 
   const prompt = `Calculate the estimated calories for each food item based on the provided portion sizes. 
   Items: ${JSON.stringify(itemsWithSizes)}

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { analyzeFoodPhotoForTelegram } from "@/lib/gemini-calories";
+import {
+  analyzeFoodPhotoForTelegram,
+  generateTelegramTextReply,
+} from "@/lib/gemini-calories";
 
 const TELEGRAM_SEND = (token: string) =>
   `https://api.telegram.org/bot${token}/sendMessage`;
@@ -72,11 +75,14 @@ export async function POST(req: NextRequest) {
 
   try {
     if (text) {
-      await telegramReply(
-        chatId,
-        "Hi! Send me a food photo and I'll calculate the calories 🍽️",
-        token
-      );
+      let reply: string;
+      try {
+        reply = await generateTelegramTextReply(text);
+      } catch {
+        reply =
+          "Hi! Send me a food photo and I'll calculate the calories 🍽️";
+      }
+      await telegramReply(chatId, reply, token);
     } else if (photos && photos.length > 0) {
       await telegramReply(chatId, "📸 Analyzing your food...", token);
 
