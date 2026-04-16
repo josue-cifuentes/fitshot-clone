@@ -6,7 +6,7 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 async function sendMessage(chatId: string | number, text: string) {
-  console.log(`[Telegram] Sending message to ${chatId}. Token starts with: ${BOT_TOKEN.slice(0, 5)}...`);
+  console.log(`[Telegram] Sending reply to: ${chatId}. Message: ${text.slice(0, 50)}...`);
   try {
     const res = await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: "POST",
@@ -16,10 +16,8 @@ async function sendMessage(chatId: string | number, text: string) {
     
     const body = await res.json();
     console.log(`[Telegram] sendMessage response status: ${res.status}`);
-    console.log(`[Telegram] sendMessage response body:`, JSON.stringify(body, null, 2));
-
     if (!res.ok) {
-      console.error(`[Telegram] Error sending message: ${body.description || 'Unknown error'}`);
+      console.error(`[Telegram] Error sending message: ${JSON.stringify(body)}`);
     }
   } catch (e) {
     console.error("[Telegram] Failed to send telegram message:", e);
@@ -55,7 +53,6 @@ function calculateTDEE(weight: number, height: number, age: number, activityLeve
 }
 
 export async function POST(req: NextRequest) {
-  // Always return 200 to Telegram immediately to prevent retries
   let update: any;
   try {
     update = await req.json();
@@ -63,26 +60,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   
-  console.log("Telegram Update:", JSON.stringify(update, null, 2));
+  console.log("Telegram Update Received:", JSON.stringify(update, null, 2));
 
   // Process in background
   (async () => {
     try {
       const message = update.message;
-      if (!message || !message.chat?.id) return;
+      if (!message || !message.chat?.id) {
+        console.log("Update has no valid message or chat ID");
+        return;
+      }
 
       const chatId = String(message.chat.id);
       const text = message.text?.trim();
       const photo = message.photo;
 
-      // IMMEDIATE CONFIRMATION for text messages
-      if (text) {
-        await sendMessage(chatId, `Got it: "${text}"`);
-      }
+      console.log("Processing message from chat:", chatId);
 
       // Find or create state
       let state = await prisma.telegramState.findUnique({ where: { telegramChatId: chatId } });
       if (!state) {
+        console.log("Creating new state for chat:", chatId);
         state = await prisma.telegramState.create({ data: { telegramChatId: chatId, state: "IDLE" } });
       }
 
@@ -133,7 +131,7 @@ export async function POST(req: NextRequest) {
               return;
             }
           }
-          await sendMessage(chatId, "Welcome! Please connect your Strava account from the FitShot dashboard to link your profile.");
+          await sendMessage(chatId, "Welcome to FitShot! Send me a food photo to track your calories.");
           return;
         }
 
@@ -265,14 +263,14 @@ export async function POST(req: NextRequest) {
               });
               await sendMessage(chatId, "Let's set up your goals! What is your daily calorie deficit goal for this week? (e.g., 500)");
             } else {
-              await sendMessage(chatId, "I received your message! Send me a photo of your meal to track calories, or say 'setup' to update your goals.");
+              await sendMessage(chatId, "Welcome to FitShot! Send me a food photo to track your calories, or say 'setup' to update your goals.");
             }
           }
         }
         return;
       }
     } catch (e) {
-      console.error("Background processing error:", e);
+      console.error("CRITICAL: Message handling error:", e);
     }
   })();
 
