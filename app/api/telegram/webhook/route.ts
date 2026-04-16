@@ -271,6 +271,21 @@ export async function POST(req: NextRequest) {
                 foods: foodsLabel,
                 calories: total,
               };
+
+              try {
+                await logMealToSheet(sheetPayload);
+              } catch (error: unknown) {
+                const err = error as { message?: string; response?: { data?: unknown } };
+                console.error(
+                  "[telegram] logMealToSheet failed:",
+                  err?.message,
+                  err?.response?.data
+                );
+                console.error(
+                  "[telegram] Google error.response.data (full):",
+                  JSON.stringify(err?.response?.data)
+                );
+              }
             }
           } catch (e) {
             console.error("[telegram] persist meal:", e);
@@ -294,16 +309,6 @@ export async function POST(req: NextRequest) {
               ? "Nothing to log (0 kcal)."
               : "Could not save this meal. Please try again.";
           await telegramReply(chatId, `${intro}\n\n${tail}`, token);
-
-          if (sheetPayload) {
-            void (async () => {
-              try {
-                await logMealToSheet(sheetPayload);
-              } catch {
-                /* Errors logged in lib/googleSheets.ts — do not surface to user */
-              }
-            })();
-          }
         }
       } else if (session.waitingFor === "meal_type") {
         const parsed = parseMealTypeReply(text);

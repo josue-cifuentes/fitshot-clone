@@ -31,6 +31,8 @@ export type LogMealSheetResult = {
   sheetSynced: boolean;
 };
 
+type SheetsClient = ReturnType<typeof google.sheets>;
+
 function sheetConfigured(): boolean {
   return Boolean(
     process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() &&
@@ -45,20 +47,23 @@ function logSheetsEnv(): void {
   console.log("Private key exists:", !!process.env.GOOGLE_PRIVATE_KEY);
 }
 
-function getSheetsClient() {
-  logSheetsEnv();
+function createJwtAuth() {
   const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL!.trim();
   const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n") ?? "";
-  const auth = new google.auth.JWT({
+  return new google.auth.JWT({
     email,
     key: privateKey,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
-  return google.sheets({ version: "v4", auth });
 }
 
 function escapeSheetTitle(title: string): string {
   return `'${title.replace(/'/g, "''")}'`;
+}
+
+/** Range for append: TabName!A:G (quoted if tab has spaces). */
+function appendRangeForTab(tabTitle: string): string {
+  return `${escapeSheetTitle(tabTitle)}!A:G`;
 }
 
 /** Guatemala noon on calendar y-m-d → UTC (Guatemala has no DST). */
@@ -90,12 +95,11 @@ function parseCalories(cell: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-export async function ensureWeekSheetExists(tabTitle: string): Promise<void> {
-  if (!sheetConfigured()) return;
-
-  const spreadsheetId = process.env.GOOGLE_SHEET_ID!.trim();
-  const sheets = getSheetsClient();
-
+async function ensureWeekSheetExistsWithClient(
+  sheets: SheetsClient,
+  spreadsheetId: string,
+  tabTitle: string
+): Promise<void> {
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const exists = meta.data.sheets?.some((s) => s.properties?.title === tabTitle);
   if (exists) return;
@@ -124,6 +128,16 @@ export async function ensureWeekSheetExists(tabTitle: string): Promise<void> {
   });
 }
 
+export async function ensureWeekSheetExists(tabTitle: string): Promise<void> {
+  if (!sheetConfigured()) return;
+
+  const spreadsheetId = process.env.GOOGLE_SHEET_ID!.trim();
+  const auth = createJwtAuth();
+  await auth.authorize();
+  const sheets = google.sheets({ version: "v4", auth });
+  await ensureWeekSheetExistsWithClient(sheets, spreadsheetId, tabTitle);
+}
+
 /**
  * Append a meal row, then set Daily / Weekly totals from sums of column E
  * for that date and for the whole tab (week).
@@ -137,12 +151,19 @@ export async function logMealToSheet(data: MealSheetLogInput): Promise<LogMealSh
   try {
     const spreadsheetId = process.env.GOOGLE_SHEET_ID!.trim();
     const tabTitle = tabTitleForRowDate(data.date);
-    await ensureWeekSheetExists(tabTitle);
 
-    const sheets = getSheetsClient();
-    const q = escapeSheetTitle(tabTitle);
+    console.log("Step A: Starting Google Sheets auth");
+    logSheetsEnv();
+    const auth = createJwtAuth();
+    await auth.authorize();
 
-    const newRow = [
+    console.log("Step B: Auth complete, getting sheets client");
+    const sheets = google.sheets({ version: "v4", auth });
+
+    console.log("Step C: Checking/creating tab for week:", tabTitle);
+    await ensureWeekSheetExistsWithClient(sheets, spreadsheetId, tabTitle);
+
+    const rowData = [
       data.date,
       data.day,
       String(data.mealNumber),
@@ -151,15 +172,20 @@ export async function logMealToSheet(data: MealSheetLogInput): Promise<LogMealSh
       "",
       "",
     ];
+    const appendRange = appendRangeForTab(tabTitle);
+    console.log("Step D: Appending row with data:", rowData);
+    console.log("Step D: Append range (TabName!A:G):", appendRange);
 
-    await sheets.spreadsheets.values.append({
+    const appendRes = await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: `${q}!A:G`,
+      range: appendRange,
       valueInputOption: "USER_ENTERED",
       insertDataOption: "INSERT_ROWS",
-      requestBody: { values: [newRow] },
+      requestBody: { values: [rowData] },
     });
+    console.log("Step E: Append response:", JSON.stringify(appendRes.data));
 
+    const q = escapeSheetTitle(tabTitle);
     const read = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${q}!A2:E2000`,
@@ -199,7 +225,9 @@ export async function logMealToSheet(data: MealSheetLogInput): Promise<LogMealSh
 
     return { dailyTotal, weeklyTotal: weekly, sheetSynced: true };
   } catch (error: any) {
-    console.error("Google Sheets full error:", error?.message, error?.response?.data);
+    const apiData = error?.response?.data;
+    console.error("Google Sheets full error:", error?.message, apiData);
+    console.error("Google Sheets error.response.data (full):", JSON.stringify(apiData));
     throw error;
   }
 }
