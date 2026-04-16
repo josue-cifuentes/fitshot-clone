@@ -91,6 +91,33 @@ function labelMealType(t: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+const WELCOME_MESSAGE =
+  "Welcome! To log meals to your own Google Sheet, send: /setsheet YOUR_SHEET_ID — or just start sending food photos!";
+
+/** Extract spreadsheet ID from a raw ID or a Google Sheets URL. */
+function parseSpreadsheetIdFromInput(raw: string): string | null {
+  const s = raw.trim().replace(/^["']|["']$/g, "");
+  const fromUrl = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (fromUrl) return fromUrl[1];
+  if (/^[a-zA-Z0-9-_]+$/.test(s)) return s;
+  return null;
+}
+
+type SetSheetParse =
+  | { ok: true; sheetId: string }
+  | { ok: false; reason: "usage" };
+
+function parseSetSheetCommand(text: string): SetSheetParse | null {
+  const trimmed = text.trim();
+  if (!/^\/setsheet/i.test(trimmed)) return null;
+  const m = /^\/setsheet(?:@\S+)?(?:\s+(.+))?$/i.exec(trimmed);
+  const arg = m?.[1]?.trim();
+  if (!arg) return { ok: false, reason: "usage" };
+  const id = parseSpreadsheetIdFromInput(arg);
+  if (!id) return { ok: false, reason: "usage" };
+  return { ok: true, sheetId: id };
+}
+
 /** Ready for a new meal photo or general assistant (not waiting on meal_type / portions). */
 function isAssistantTurn(waitingFor: string | null | undefined): boolean {
   return waitingFor == null || waitingFor === "" || waitingFor === "idle";
@@ -103,6 +130,7 @@ function logSessionUpdated(
     state: string;
     mealType: string | null;
     foodItems: Prisma.JsonValue | null;
+    sheetId?: string | null;
   }
 ) {
   const foodCount = Array.isArray(row.foodItems) ? row.foodItems.length : 0;
@@ -112,6 +140,7 @@ function logSessionUpdated(
     state: row.state,
     mealType: row.mealType,
     foodItemsCount: foodCount,
+    sheetId: row.sheetId ?? null,
   });
 }
 
@@ -145,12 +174,20 @@ export async function POST(req: NextRequest) {
   const photos = message.photo;
 
   try {
+    const sessionExisted = await prisma.telegramSession.findUnique({
+      where: { chatId: chatIdStr },
+    });
+
     let session = await prisma.telegramSession.upsert({
       where: { chatId: chatIdStr },
       update: {},
       create: { chatId: chatIdStr, state: "idle" },
     });
     console.log("Session loaded:", JSON.stringify(session));
+
+    if (!sessionExisted) {
+      await telegramReply(chatId, WELCOME_MESSAGE, token);
+    }
 
     if (photos && photos.length > 0) {
       if (!isAssistantTurn(session.waitingFor)) {
@@ -202,6 +239,29 @@ export async function POST(req: NextRequest) {
         );
       }
     } else if (text) {
+      const setSheet = parseSetSheetCommand(text);
+      if (setSheet) {
+        if (!setSheet.ok) {
+          await telegramReply(
+            chatId,
+            "Usage: /setsheet YOUR_SHEET_ID\nPaste the spreadsheet ID or a full Google Sheets URL. Share the sheet with your service account email as Editor.",
+            token
+          );
+          return NextResponse.json({ ok: true });
+        }
+        session = await prisma.telegramSession.update({
+          where: { chatId: chatIdStr },
+          data: { sheetId: setSheet.sheetId },
+        });
+        logSessionUpdated("setsheet", session);
+        await telegramReply(
+          chatId,
+          `Got it — I'll log meals to spreadsheet ${setSheet.sheetId}. Make sure that sheet is shared with your Google service account as Editor.`,
+          token
+        );
+        return NextResponse.json({ ok: true });
+      }
+
       if (session.waitingFor === "portions") {
         const items = foodItemsFromJson(session.foodItems);
         if (items.length === 0 || !session.mealType) {
@@ -273,7 +333,11 @@ export async function POST(req: NextRequest) {
               };
 
               try {
-                await logMealToSheet(sheetPayload);
+                const sheetPrefs = await prisma.telegramSession.findUnique({
+                  where: { chatId: chatIdStr },
+                  select: { sheetId: true },
+                });
+                await logMealToSheet(sheetPayload, sheetPrefs?.sheetId ?? null);
               } catch (error: unknown) {
                 const err = error as { message?: string; response?: { data?: unknown } };
                 console.error(

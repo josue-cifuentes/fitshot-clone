@@ -33,16 +33,26 @@ export type LogMealSheetResult = {
 
 type SheetsClient = ReturnType<typeof google.sheets>;
 
-function sheetConfigured(): boolean {
+/** Resolve spreadsheet ID: session override, else env default. */
+export function resolveSpreadsheetId(sessionSheetId?: string | null): string | null {
+  const fromSession = sessionSheetId?.trim();
+  if (fromSession) return fromSession;
+  const fromEnv = process.env.GOOGLE_SHEET_ID?.trim();
+  return fromEnv || null;
+}
+
+function sheetConfigured(sessionSheetId?: string | null): boolean {
+  const id = resolveSpreadsheetId(sessionSheetId);
   return Boolean(
     process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() &&
       process.env.GOOGLE_PRIVATE_KEY?.trim() &&
-      process.env.GOOGLE_SHEET_ID?.trim()
+      id
   );
 }
 
-function logSheetsEnv(): void {
-  console.log("Sheet ID:", process.env.GOOGLE_SHEET_ID);
+function logSheetsEnv(effectiveSpreadsheetId: string): void {
+  console.log("Sheet ID (env GOOGLE_SHEET_ID):", process.env.GOOGLE_SHEET_ID);
+  console.log("Effective spreadsheet ID (session or env):", effectiveSpreadsheetId);
   console.log("Service account email:", process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL);
   console.log("Private key exists:", !!process.env.GOOGLE_PRIVATE_KEY);
 }
@@ -129,7 +139,7 @@ async function ensureWeekSheetExistsWithClient(
 }
 
 export async function ensureWeekSheetExists(tabTitle: string): Promise<void> {
-  if (!sheetConfigured()) return;
+  if (!sheetConfigured(null)) return;
 
   const spreadsheetId = process.env.GOOGLE_SHEET_ID!.trim();
   const auth = createJwtAuth();
@@ -141,19 +151,25 @@ export async function ensureWeekSheetExists(tabTitle: string): Promise<void> {
 /**
  * Append a meal row, then set Daily / Weekly totals from sums of column E
  * for that date and for the whole tab (week).
+ * @param spreadsheetIdOverride TelegramSession.sheetId if set, else omit to use GOOGLE_SHEET_ID
  */
-export async function logMealToSheet(data: MealSheetLogInput): Promise<LogMealSheetResult> {
-  if (!sheetConfigured()) {
-    console.warn("[googleSheets] Skipping — set GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY, GOOGLE_SHEET_ID");
+export async function logMealToSheet(
+  data: MealSheetLogInput,
+  spreadsheetIdOverride?: string | null
+): Promise<LogMealSheetResult> {
+  if (!sheetConfigured(spreadsheetIdOverride)) {
+    console.warn(
+      "[googleSheets] Skipping — set GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY, and GOOGLE_SHEET_ID or /setsheet"
+    );
     return { dailyTotal: 0, weeklyTotal: 0, sheetSynced: false };
   }
 
   try {
-    const spreadsheetId = process.env.GOOGLE_SHEET_ID!.trim();
+    const spreadsheetId = resolveSpreadsheetId(spreadsheetIdOverride)!;
     const tabTitle = tabTitleForRowDate(data.date);
 
     console.log("Step A: Starting Google Sheets auth");
-    logSheetsEnv();
+    logSheetsEnv(spreadsheetId);
     const auth = createJwtAuth();
     await auth.authorize();
 

@@ -73,5 +73,7 @@ model TelegramSession {
   mealType   String?
   /// "meal_type" | "portions" — next step in the meal logging flow
   waitingFor String?
+  /// Per-chat Google Spreadsheet ID (optional; falls back to GOOGLE_SHEET_ID env)
+  sheetId    String?
   updatedAt  DateTime @updatedAt
 }
