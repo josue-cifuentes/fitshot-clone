@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const res = NextResponse.redirect(`${base}/activities`);
+  const res = NextResponse.redirect(`${base}/dashboard`);
   res.cookies.delete(STRAVA_OAUTH_STATE_COOKIE);
   res.cookies.set(STRAVA_ACCESS_TOKEN_COOKIE, token.access_token, {
     httpOnly: true,

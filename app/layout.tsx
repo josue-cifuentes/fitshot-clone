@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
-import { AppSessionProvider } from "./components/session-provider";
 import { AppShell } from "./components/app-shell";
 import { Footer } from "./components/Footer";
 import "./globals.css";
@@ -50,9 +49,7 @@ export default function RootLayout({
       className={`${inter.variable} h-full antialiased`}
     >
       <body className="min-h-[100dvh] min-h-dvh flex flex-col font-sans">
-        <AppSessionProvider>
-          <AppShell footer={<Footer />}>{children}</AppShell>
-        </AppSessionProvider>
+        <AppShell footer={<Footer />}>{children}</AppShell>
       </body>
     </html>
   );

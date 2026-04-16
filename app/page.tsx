@@ -1,8 +1,8 @@
-import Link from "next/link";
-import { getStravaAccessTokenFromCookies } from "@/lib/coach-auth";
+import { cookies } from "next/headers";
+import { STRAVA_ACCESS_TOKEN_COOKIE } from "@/lib/strava";
 
 export default async function Home() {
-  const token = await getStravaAccessTokenFromCookies();
+  const token = (await cookies()).get(STRAVA_ACCESS_TOKEN_COOKIE)?.value;
   const connected = Boolean(token);
 
   return (

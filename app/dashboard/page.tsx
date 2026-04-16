@@ -1,62 +1,33 @@
-"use client";
+import { cookies } from "next/headers";
+import { STRAVA_ACCESS_TOKEN_COOKIE } from "@/lib/strava";
+import { prisma } from "@/lib/db";
+import { fetchStravaAthlete } from "@/lib/strava";
+import { redirect } from "next/navigation";
 
-import { useState, useEffect, useCallback } from "react";
-import { signOut } from "next-auth/react";
-import { 
-  IconLink, 
-  IconActivities, 
-  IconCoach 
-} from "@/app/components/nav-icons";
+export default async function Dashboard() {
+  const token = (await cookies()).get(STRAVA_ACCESS_TOKEN_COOKIE)?.value;
+  if (!token) {
+    redirect("/login");
+  }
 
-type ConnectionStatus = {
-  strava: boolean;
-  garmin: boolean;
-  appleHealth: boolean;
-  telegram: boolean;
-  instagram: boolean;
-};
+  let athlete;
+  try {
+    athlete = await fetchStravaAthlete(token);
+  } catch (e) {
+    redirect("/login?error=token_expired");
+  }
 
-export default function Dashboard() {
-  const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState<ConnectionStatus>({
-    strava: false,
-    garmin: false,
-    appleHealth: false,
-    telegram: false,
-    instagram: false,
+  const profile = await prisma.coachProfile.findUnique({
+    where: { stravaAthleteId: athlete.id },
   });
 
-  const loadStatus = useCallback(async () => {
-    try {
-      const res = await fetch("/api/coach/dashboard");
-      if (res.ok) {
-        const data = await res.json();
-        setStatus({
-          strava: true, // If we can reach this, Strava is connected via NextAuth
-          garmin: !!data.profile?.hasGarmin,
-          appleHealth: !!data.appleHealth?.hasData,
-          telegram: !!data.telegram?.isLinked,
-          instagram: !!data.profile?.instagramAccessToken,
-        });
-      }
-    } catch (e) {
-      console.error("Failed to load status", e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadStatus();
-  }, [loadStatus]);
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0A0A0A] text-[#F5F5F5]/50">
-        Loading...
-      </div>
-    );
-  }
+  const status = {
+    strava: true,
+    garmin: !!(profile?.garminEmail && profile?.garminPasswordCipher),
+    appleHealth: !!profile?.healthExportToken,
+    telegram: !!profile?.telegramChatId,
+    instagram: !!profile?.instagramAccessToken,
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-[#0A0A0A] text-[#F5F5F5] font-sans">
@@ -73,22 +44,22 @@ export default function Dashboard() {
             <ConnectionCard 
               name="Strava" 
               connected={status.strava} 
-              onDisconnect={() => signOut({ callbackUrl: "/login" })}
+              href="/login" // Re-authorizing is fine
             />
             <ConnectionCard 
               name="Garmin" 
               connected={status.garmin} 
-              href="/coach" // Keep existing Garmin login UI for now
+              href="/garmin"
             />
             <ConnectionCard 
               name="Apple Health" 
               connected={status.appleHealth} 
-              href="/coach"
+              href="/apple-health"
             />
             <ConnectionCard 
               name="Telegram" 
               connected={status.telegram} 
-              href="/coach"
+              href="/telegram"
             />
           </div>
         </section>
@@ -127,13 +98,11 @@ export default function Dashboard() {
 function ConnectionCard({ 
   name, 
   connected, 
-  onDisconnect,
   href 
 }: { 
   name: string; 
   connected: boolean; 
-  onDisconnect?: () => void;
-  href?: string;
+  href: string;
 }) {
   return (
     <div className="glass-panel rounded-2xl p-4 flex items-center justify-between">
@@ -141,21 +110,12 @@ function ConnectionCard({
         <div className={`w-2 h-2 rounded-full ${connected ? 'bg-[#E8FF00]' : 'bg-[#F5F5F5]/20'}`} />
         <span className="text-sm font-medium">{name}</span>
       </div>
-      {connected ? (
-        <button 
-          onClick={onDisconnect}
-          className="text-xs font-bold text-red-400/80 hover:text-red-400 transition"
-        >
-          Disconnect
-        </button>
-      ) : (
-        <a 
-          href={href}
-          className="text-xs font-bold text-[#E8FF00] hover:brightness-110 transition"
-        >
-          Connect
-        </a>
-      )}
+      <a 
+        href={href}
+        className={`text-xs font-bold transition ${connected ? 'text-[#F5F5F5]/40 hover:text-[#F5F5F5]/60' : 'text-[#E8FF00] hover:brightness-110'}`}
+      >
+        {connected ? 'Reconnect' : 'Connect'}
+      </a>
     </div>
   );
 }
