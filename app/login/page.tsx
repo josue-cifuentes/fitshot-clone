@@ -6,6 +6,15 @@ import {
 } from "@/lib/strava";
 import { randomBytes } from "node:crypto";
 
+const errorMessages: Record<string, string> = {
+  access_denied: "Strava authorization was cancelled.",
+  invalid_state: "Invalid session state. Please try again.",
+  token_exchange: "Failed to exchange authorization code. Try again.",
+  token_expired: "Your session has expired. Please connect again.",
+  server: "Something went wrong. Please try again later.",
+  Default: "Connection failed. Please try again.",
+};
+
 export default async function LoginPage({
   searchParams,
 }: {
