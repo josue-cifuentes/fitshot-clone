@@ -7,13 +7,21 @@ import {
   identifyFoodItems,
   nutritionAssistantReply,
 } from "@/lib/gemini-calories";
-import { type MealSheetLogInput, logMealToSheet, sheetDateDayFromUtc } from "@/lib/googleSheets";
+import {
+  type MealSheetLogInput,
+  logMealToSheet,
+  sheetDateDayFromUtc,
+} from "@/lib/googleSheets";
 import { mealLogMetricsForTelegramChat } from "@/lib/meal-metrics";
 
 const TELEGRAM_SEND = (token: string) =>
   `https://api.telegram.org/bot${token}/sendMessage`;
 
-async function telegramReply(chatId: number | string, text: string, token: string) {
+async function telegramReply(
+  chatId: number | string,
+  text: string,
+  token: string,
+) {
   const res = await fetch(TELEGRAM_SEND(token), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -24,16 +32,20 @@ async function telegramReply(chatId: number | string, text: string, token: strin
   });
   const body = await res.text();
   if (!res.ok) {
-    console.error("[telegram] sendMessage failed", res.status, body.slice(0, 500));
+    console.error(
+      "[telegram] sendMessage failed",
+      res.status,
+      body.slice(0, 500),
+    );
   }
 }
 
 async function downloadTelegramPhoto(
   fileId: string,
-  token: string
+  token: string,
 ): Promise<{ base64: string; mimeType: string }> {
   const meta = await fetch(
-    `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`
+    `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`,
   );
   const metaJson = (await meta.json()) as {
     ok?: boolean;
@@ -43,18 +55,16 @@ async function downloadTelegramPhoto(
     throw new Error("getFile failed");
   }
   const path = metaJson.result.file_path;
-  const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${path}`);
+  const fileRes = await fetch(
+    `https://api.telegram.org/file/bot${token}/${path}`,
+  );
   if (!fileRes.ok) {
     throw new Error(`file download ${fileRes.status}`);
   }
   const buf = Buffer.from(await fileRes.arrayBuffer());
   const ext = path.split(".").pop()?.toLowerCase();
   const mimeType =
-    ext === "png"
-      ? "image/png"
-      : ext === "webp"
-        ? "image/webp"
-        : "image/jpeg";
+    ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
   return { base64: buf.toString("base64"), mimeType };
 }
 
@@ -75,9 +85,13 @@ type HistoryMessage = { role: "user" | "assistant"; content: string };
 function parseConversationHistory(raw: unknown): HistoryMessage[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((x): x is { role?: unknown; content?: unknown } => !!x && typeof x === "object")
+    .filter(
+      (x): x is { role?: unknown; content?: unknown } =>
+        !!x && typeof x === "object",
+    )
     .map((x) => {
-      const role: HistoryMessage["role"] = x.role === "assistant" ? "assistant" : "user";
+      const role: HistoryMessage["role"] =
+        x.role === "assistant" ? "assistant" : "user";
       const content = typeof x.content === "string" ? x.content : "";
       return { role, content };
     })
@@ -88,7 +102,7 @@ function parseConversationHistory(raw: unknown): HistoryMessage[] {
 function appendHistory(
   history: HistoryMessage[],
   role: "user" | "assistant",
-  content: string
+  content: string,
 ): HistoryMessage[] {
   const trimmed = content.trim();
   if (!trimmed) return history.slice(-20);
@@ -106,7 +120,9 @@ function fmtCal(n: number): string {
   return `${n.toLocaleString("en-US")} cal`;
 }
 
-function parseMealTypeReply(raw: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
+function parseMealTypeReply(
+  raw: string,
+): "breakfast" | "lunch" | "dinner" | "snack" | null {
   const t = raw.trim().toLowerCase().replace(/\.$/, "");
   const allowed = ["breakfast", "lunch", "dinner", "snack"] as const;
   if ((allowed as readonly string[]).includes(t)) {
@@ -163,7 +179,7 @@ function logSessionUpdated(
     mealType: string | null;
     foodItems: Prisma.JsonValue | null;
     sheetId?: string | null;
-  }
+  },
 ) {
   const foodCount = Array.isArray(row.foodItems) ? row.foodItems.length : 0;
   console.log("Session updated to:", {
@@ -177,166 +193,140 @@ function logSessionUpdated(
 }
 
 export async function POST(req: NextRequest) {
-  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
-  if (!token) {
-    return NextResponse.json({ ok: true });
-  }
-  const botToken = token;
-
-  let body: {
-    message?: { chat?: { id: number }; text?: string; photo?: { file_id: string }[] };
-  };
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ ok: true });
-  }
+    const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+    if (!token) {
+      return NextResponse.json({ ok: true });
+    }
+    const botToken = token;
 
-  const { message } = body;
-  if (!message) {
-    return NextResponse.json({ ok: true });
-  }
+    let body: {
+      message?: {
+        chat?: { id: number };
+        text?: string;
+        photo?: { file_id: string }[];
+      };
+    };
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ ok: true });
+    }
 
-  const chatId = message.chat?.id;
-  if (chatId == null) {
-    return NextResponse.json({ ok: true });
-  }
+    const { message } = body;
+    if (!message) {
+      return NextResponse.json({ ok: true });
+    }
 
-  const chatIdStr = String(chatId);
-  const text = message.text?.trim();
-  const photos = message.photo;
+    const chatId = message.chat?.id;
+    if (chatId == null) {
+      return NextResponse.json({ ok: true });
+    }
 
-  try {
-    const sessionExisted = await prisma.telegramSession.findUnique({
-      where: { chatId: chatIdStr },
-    });
+    const chatIdStr = String(chatId);
+    const text = message.text?.trim();
+    const photos = message.photo;
 
-    let session = await prisma.telegramSession.upsert({
-      where: { chatId: chatIdStr },
-      update: {},
-      create: { chatId: chatIdStr, state: "idle" },
-    });
-    console.log("Session loaded:", JSON.stringify(session));
-    let conversationHistory = parseConversationHistory(session.conversationHistory);
-    let weeklyContext = parseWeeklyContext(session.weeklyContext);
-
-    async function persistSessionUpdate(
-      payload:
-        | Prisma.TelegramSessionUpdateInput
-        | { data: Prisma.TelegramSessionUpdateInput }
-    ) {
-      const data = "data" in payload ? payload.data : payload;
-      session = await prisma.telegramSession.update({
+    try {
+      const sessionExisted = await prisma.telegramSession.findUnique({
         where: { chatId: chatIdStr },
-        data,
       });
-      conversationHistory = parseConversationHistory(session.conversationHistory);
-      weeklyContext = parseWeeklyContext(session.weeklyContext);
-      return session;
-    }
 
-    async function sendAssistantMessage(textOut: string) {
-      await telegramReply(chatIdStr, textOut, botToken);
-      conversationHistory = appendHistory(conversationHistory, "assistant", textOut);
-      await persistSessionUpdate({
-        conversationHistory: conversationHistory as Prisma.InputJsonValue,
+      let session = await prisma.telegramSession.upsert({
+        where: { chatId: chatIdStr },
+        update: {},
+        create: { chatId: chatIdStr, state: "idle" },
       });
-    }
+      console.log("Session loaded:", JSON.stringify(session));
+      let conversationHistory = parseConversationHistory(
+        session.conversationHistory,
+      );
+      let weeklyContext = parseWeeklyContext(session.weeklyContext);
 
-    if (text) {
-      conversationHistory = appendHistory(conversationHistory, "user", text);
-      await persistSessionUpdate({
-        conversationHistory: conversationHistory as Prisma.InputJsonValue,
-      });
-      try {
-        const delta = await extractUserDemographicsFromMessage(text);
-        if (Object.keys(delta).length > 0) {
-          weeklyContext = { ...weeklyContext, ...delta };
-          const mergedUserData = {
-            ...parseUserData(session.userData),
-            ...delta,
-          };
-          const row = await persistSessionUpdate({
-            weeklyContext: weeklyContext as Prisma.InputJsonValue,
-            userData: mergedUserData as Prisma.InputJsonValue,
-          });
-          logSessionUpdated("weeklyContext_merge", row);
+      async function persistSessionUpdate(
+        payload:
+          | Prisma.TelegramSessionUpdateInput
+          | { data: Prisma.TelegramSessionUpdateInput },
+      ) {
+        const data = "data" in payload ? payload.data : payload;
+        session = await prisma.telegramSession.update({
+          where: { chatId: chatIdStr },
+          data,
+        });
+        conversationHistory = parseConversationHistory(
+          session.conversationHistory,
+        );
+        weeklyContext = parseWeeklyContext(session.weeklyContext);
+        return session;
+      }
+
+      async function sendAssistantMessage(textOut: string) {
+        await telegramReply(chatIdStr, textOut, botToken);
+        conversationHistory = appendHistory(
+          conversationHistory,
+          "assistant",
+          textOut,
+        );
+        await persistSessionUpdate({
+          conversationHistory: conversationHistory as Prisma.InputJsonValue,
+        });
+      }
+
+      if (text) {
+        conversationHistory = appendHistory(conversationHistory, "user", text);
+        await persistSessionUpdate({
+          conversationHistory: conversationHistory as Prisma.InputJsonValue,
+        });
+        try {
+          const delta = await extractUserDemographicsFromMessage(text);
+          if (Object.keys(delta).length > 0) {
+            weeklyContext = { ...weeklyContext, ...delta };
+            const mergedUserData = {
+              ...parseUserData(session.userData),
+              ...delta,
+            };
+            const row = await persistSessionUpdate({
+              weeklyContext: weeklyContext as Prisma.InputJsonValue,
+              userData: mergedUserData as Prisma.InputJsonValue,
+            });
+            logSessionUpdated("weeklyContext_merge", row);
+          }
+        } catch (e) {
+          console.error("[telegram] weeklyContext merge failed:", e);
         }
-      } catch (e) {
-        console.error("[telegram] weeklyContext merge failed:", e);
-      }
-    } else if (photos && photos.length > 0) {
-      conversationHistory = appendHistory(conversationHistory, "user", "[photo]");
-      await persistSessionUpdate({
-        conversationHistory: conversationHistory as Prisma.InputJsonValue,
-      });
-    }
-
-    if (!sessionExisted) {
-      await sendAssistantMessage(WELCOME_MESSAGE);
-    }
-
-    if (photos && photos.length > 0) {
-      if (!isAssistantTurn(session.waitingFor)) {
-        await sendAssistantMessage(
-          "Finish the current meal step with a text reply first (meal type or portions)."
+      } else if (photos && photos.length > 0) {
+        conversationHistory = appendHistory(
+          conversationHistory,
+          "user",
+          "[photo]",
         );
-        return NextResponse.json({ ok: true });
+        await persistSessionUpdate({
+          conversationHistory: conversationHistory as Prisma.InputJsonValue,
+        });
       }
 
-      await sendAssistantMessage("📸 Analyzing your food...");
-
-      const best = photos[photos.length - 1];
-      const { base64, mimeType } = await downloadTelegramPhoto(best.file_id, botToken);
-      const items = await identifyFoodItems(base64, mimeType);
-
-      if (items.length === 0) {
-        session = await persistSessionUpdate({
-          data: {
-            state: "idle",
-            foodItems: Prisma.JsonNull,
-            mealType: null,
-            waitingFor: null,
-          },
-        });
-        logSessionUpdated("photo_no_food", session);
-        await sendAssistantMessage("I couldn't spot food in that image. Send another photo 📸");
-      } else {
-        session = await persistSessionUpdate({
-          data: {
-            state: "meal_logging",
-            foodItems: items,
-            mealType: null,
-            waitingFor: "meal_type",
-          },
-        });
-        logSessionUpdated("photo_identified_meal_type", session);
-        await sendAssistantMessage(
-          `I see: ${items.join(", ")}.\n\nWhat meal is this? Reply with: Breakfast, Lunch, Dinner, or Snack`
-        );
+      if (!sessionExisted) {
+        await sendAssistantMessage(WELCOME_MESSAGE);
       }
-    } else if (text) {
-      const setSheet = parseSetSheetCommand(text);
-      if (setSheet) {
-        if (!setSheet.ok) {
+
+      if (photos && photos.length > 0) {
+        if (!isAssistantTurn(session.waitingFor)) {
           await sendAssistantMessage(
-            "Usage: /setsheet YOUR_SHEET_ID\nPaste the spreadsheet ID or a full Google Sheets URL. Share the sheet with your service account email as Editor."
+            "Finish the current meal step with a text reply first (meal type or portions).",
           );
           return NextResponse.json({ ok: true });
         }
-        session = await persistSessionUpdate({
-          data: { sheetId: setSheet.sheetId },
-        });
-        logSessionUpdated("setsheet", session);
-        await sendAssistantMessage(
-          `Got it — I'll log meals to spreadsheet ${setSheet.sheetId}. Make sure that sheet is shared with your Google service account as Editor.`
+
+        await sendAssistantMessage("📸 Analyzing your food...");
+
+        const best = photos[photos.length - 1];
+        const { base64, mimeType } = await downloadTelegramPhoto(
+          best.file_id,
+          botToken,
         );
-        return NextResponse.json({ ok: true });
-      }
+        const items = await identifyFoodItems(base64, mimeType);
 
-      if (session.waitingFor === "portions") {
-        const items = foodItemsFromJson(session.foodItems);
-        if (items.length === 0 || !session.mealType) {
+        if (items.length === 0) {
           session = await persistSessionUpdate({
             data: {
               state: "idle",
@@ -345,108 +335,46 @@ export async function POST(req: NextRequest) {
               waitingFor: null,
             },
           });
-          logSessionUpdated("recovery_portions_missing_data", session);
-          await sendAssistantMessage("Something went wrong with the meal flow. Send a new photo 📸");
+          logSessionUpdated("photo_no_food", session);
+          await sendAssistantMessage(
+            "I couldn't spot food in that image. Send another photo 📸",
+          );
         } else {
-          const mealTypeForReply = session.mealType;
-          const itemsWithSizes = items.map((item) => ({ item, size: text }));
-          const results = await calculateCaloriesForItems(itemsWithSizes);
-          const total = results.reduce((sum, r) => sum + r.calories, 0);
-          const summary = results
-            .map((r) => `• ${r.item}: ${r.calories} kcal`)
-            .join("\n");
-
-          const foodsLabel = results.map((r) => `${r.item}`).join("; ");
-          const loggedAt = new Date();
-          const { date: sheetDate, day: sheetDay } = sheetDateDayFromUtc(loggedAt);
-
-          let dailyDisplay = 0;
-          let weeklyDisplay = 0;
-          let persisted = false;
-          let sheetPayload: MealSheetLogInput | null = null;
-
-          try {
-            if (total > 0) {
-              const profile = await prisma.userProfile.findFirst({
-                where: { telegramChatId: chatIdStr },
-              });
-
-              await prisma.calorieEntry.create({
-                data: {
-                  userProfileId: profile?.id ?? null,
-                  telegramChatId: chatIdStr,
-                  type: session.mealType,
-                  calories: total,
-                  description: foodsLabel,
-                  itemsJson: JSON.stringify(results),
-                },
-              });
-
-              const metrics = await mealLogMetricsForTelegramChat(
-                prisma,
-                chatIdStr,
-                loggedAt
-              );
-              dailyDisplay = metrics.dailyTotal;
-              weeklyDisplay = metrics.weeklyTotal;
-              persisted = true;
-
-              sheetPayload = {
-                date: sheetDate,
-                day: sheetDay,
-                mealNumber: metrics.mealNumber,
-                foods: foodsLabel,
-                calories: total,
-              };
-
-              try {
-                const sheetPrefs = await prisma.telegramSession.findUnique({
-                  where: { chatId: chatIdStr },
-                  select: { sheetId: true },
-                });
-                await logMealToSheet(sheetPayload, sheetPrefs?.sheetId ?? null);
-              } catch (error: unknown) {
-                const err = error as { message?: string; response?: { data?: unknown } };
-                console.error(
-                  "[telegram] logMealToSheet failed:",
-                  err?.message,
-                  err?.response?.data
-                );
-                console.error(
-                  "[telegram] Google error.response.data (full):",
-                  JSON.stringify(err?.response?.data)
-                );
-              }
-            }
-          } catch (e) {
-            console.error("[telegram] persist meal:", e);
-          }
-
           session = await persistSessionUpdate({
             data: {
-              state: "idle",
-              foodItems: Prisma.JsonNull,
+              state: "meal_logging",
+              foodItems: items,
               mealType: null,
-              waitingFor: null,
+              waitingFor: "meal_type",
             },
           });
-          logSessionUpdated("meal_flow_complete", session);
-
-          const intro = `Here's your ${labelMealType(mealTypeForReply ?? "meal")}:\n${summary}\n\nTotal: ${total} kcal`;
-          const tail = persisted
-            ? `✅ Logged! ${fmtCal(total)} added. Daily total: ${fmtCal(dailyDisplay)} | Weekly total: ${fmtCal(weeklyDisplay)}.`
-            : total <= 0
-              ? "Nothing to log (0 kcal)."
-              : "Could not save this meal. Please try again.";
-          await sendAssistantMessage(`${intro}\n\n${tail}`);
+          logSessionUpdated("photo_identified_meal_type", session);
+          await sendAssistantMessage(
+            `I see: ${items.join(", ")}.\n\nWhat meal is this? Reply with: Breakfast, Lunch, Dinner, or Snack`,
+          );
         }
-      } else if (session.waitingFor === "meal_type") {
-        const parsed = parseMealTypeReply(text);
-        if (!parsed) {
-          await sendAssistantMessage("Please reply with one of: Breakfast, Lunch, Dinner, or Snack.");
-        } else {
+      } else if (text) {
+        const setSheet = parseSetSheetCommand(text);
+        if (setSheet) {
+          if (!setSheet.ok) {
+            await sendAssistantMessage(
+              "Usage: /setsheet YOUR_SHEET_ID\nPaste the spreadsheet ID or a full Google Sheets URL. Share the sheet with your service account email as Editor.",
+            );
+            return NextResponse.json({ ok: true });
+          }
+          session = await persistSessionUpdate({
+            data: { sheetId: setSheet.sheetId },
+          });
+          logSessionUpdated("setsheet", session);
+          await sendAssistantMessage(
+            `Got it — I'll log meals to spreadsheet ${setSheet.sheetId}. Make sure that sheet is shared with your Google service account as Editor.`,
+          );
+          return NextResponse.json({ ok: true });
+        }
+
+        if (session.waitingFor === "portions") {
           const items = foodItemsFromJson(session.foodItems);
-          if (items.length === 0) {
+          if (items.length === 0 || !session.mealType) {
             session = await persistSessionUpdate({
               data: {
                 state: "idle",
@@ -455,46 +383,177 @@ export async function POST(req: NextRequest) {
                 waitingFor: null,
               },
             });
-            logSessionUpdated("recovery_meal_type_no_items", session);
-            await sendAssistantMessage("Food list was lost. Send a new photo 📸");
+            logSessionUpdated("recovery_portions_missing_data", session);
+            await sendAssistantMessage(
+              "Something went wrong with the meal flow. Send a new photo 📸",
+            );
           } else {
+            const mealTypeForReply = session.mealType;
+            const itemsWithSizes = items.map((item) => ({ item, size: text }));
+            const results = await calculateCaloriesForItems(itemsWithSizes);
+            const total = results.reduce((sum, r) => sum + r.calories, 0);
+            const summary = results
+              .map((r) => `• ${r.item}: ${r.calories} kcal`)
+              .join("\n");
+
+            const foodsLabel = results.map((r) => `${r.item}`).join("; ");
+            const loggedAt = new Date();
+            const { date: sheetDate, day: sheetDay } =
+              sheetDateDayFromUtc(loggedAt);
+
+            let dailyDisplay = 0;
+            let weeklyDisplay = 0;
+            let persisted = false;
+            let sheetPayload: MealSheetLogInput | null = null;
+
+            try {
+              if (total > 0) {
+                const profile = await prisma.userProfile.findFirst({
+                  where: { telegramChatId: chatIdStr },
+                });
+
+                await prisma.calorieEntry.create({
+                  data: {
+                    userProfileId: profile?.id ?? null,
+                    telegramChatId: chatIdStr,
+                    type: session.mealType,
+                    calories: total,
+                    description: foodsLabel,
+                    itemsJson: JSON.stringify(results),
+                  },
+                });
+
+                const metrics = await mealLogMetricsForTelegramChat(
+                  prisma,
+                  chatIdStr,
+                  loggedAt,
+                );
+                dailyDisplay = metrics.dailyTotal;
+                weeklyDisplay = metrics.weeklyTotal;
+                persisted = true;
+
+                sheetPayload = {
+                  date: sheetDate,
+                  day: sheetDay,
+                  mealNumber: metrics.mealNumber,
+                  foods: foodsLabel,
+                  calories: total,
+                };
+
+                try {
+                  const sheetPrefs = await prisma.telegramSession.findUnique({
+                    where: { chatId: chatIdStr },
+                    select: { sheetId: true },
+                  });
+                  await logMealToSheet(
+                    sheetPayload,
+                    sheetPrefs?.sheetId ?? null,
+                  );
+                } catch (error: unknown) {
+                  const err = error as {
+                    message?: string;
+                    response?: { data?: unknown };
+                  };
+                  console.error(
+                    "[telegram] logMealToSheet failed:",
+                    err?.message,
+                    err?.response?.data,
+                  );
+                  console.error(
+                    "[telegram] Google error.response.data (full):",
+                    JSON.stringify(err?.response?.data),
+                  );
+                }
+              }
+            } catch (e) {
+              console.error("[telegram] persist meal:", e);
+            }
+
             session = await persistSessionUpdate({
               data: {
-                mealType: parsed,
-                waitingFor: "portions",
+                state: "idle",
+                foodItems: Prisma.JsonNull,
+                mealType: null,
+                waitingFor: null,
               },
             });
-            logSessionUpdated("meal_type_saved_portions", session);
-            await sendAssistantMessage(
-              `Got it — ${labelMealType(parsed)}.\n\nHow much of each item did you eat? (e.g. 1 cup rice, 2 eggs)`
-            );
+            logSessionUpdated("meal_flow_complete", session);
+
+            const intro = `Here's your ${labelMealType(mealTypeForReply ?? "meal")}:\n${summary}\n\nTotal: ${total} kcal`;
+            const tail = persisted
+              ? `✅ Logged! ${fmtCal(total)} added. Daily total: ${fmtCal(dailyDisplay)} | Weekly total: ${fmtCal(weeklyDisplay)}.`
+              : total <= 0
+                ? "Nothing to log (0 kcal)."
+                : "Could not save this meal. Please try again.";
+            await sendAssistantMessage(`${intro}\n\n${tail}`);
           }
+        } else if (session.waitingFor === "meal_type") {
+          const parsed = parseMealTypeReply(text);
+          if (!parsed) {
+            await sendAssistantMessage(
+              "Please reply with one of: Breakfast, Lunch, Dinner, or Snack.",
+            );
+          } else {
+            const items = foodItemsFromJson(session.foodItems);
+            if (items.length === 0) {
+              session = await persistSessionUpdate({
+                data: {
+                  state: "idle",
+                  foodItems: Prisma.JsonNull,
+                  mealType: null,
+                  waitingFor: null,
+                },
+              });
+              logSessionUpdated("recovery_meal_type_no_items", session);
+              await sendAssistantMessage(
+                "Food list was lost. Send a new photo 📸",
+              );
+            } else {
+              session = await persistSessionUpdate({
+                data: {
+                  mealType: parsed,
+                  waitingFor: "portions",
+                },
+              });
+              logSessionUpdated("meal_type_saved_portions", session);
+              await sendAssistantMessage(
+                `Got it — ${labelMealType(parsed)}.\n\nHow much of each item did you eat? (e.g. 1 cup rice, 2 eggs)`,
+              );
+            }
+          }
+        } else if (isAssistantTurn(session.waitingFor)) {
+          const userData = parseUserData(session.userData);
+          const reply = await nutritionAssistantReply(text, userData, {
+            conversationHistory,
+            weeklyContext,
+          });
+          await sendAssistantMessage(reply);
+        } else {
+          await sendAssistantMessage(
+            "Send a food photo to log a meal, or continue with a text reply for the current step.",
+          );
         }
-      } else if (isAssistantTurn(session.waitingFor)) {
-        const userData = parseUserData(session.userData);
-        const reply = await nutritionAssistantReply(text, userData, {
-          conversationHistory,
-          weeklyContext,
-        });
-        await sendAssistantMessage(reply);
-      } else {
-        await sendAssistantMessage(
-          "Send a food photo to log a meal, or continue with a text reply for the current step."
+      }
+    } catch (e) {
+      console.error("[telegram] handler error:", e);
+      try {
+        await telegramReply(
+          chatIdStr,
+          "Something went wrong. Please try again in a moment.",
+          botToken,
         );
+      } catch {
+        /* ignore */
       }
     }
-  } catch (e) {
-    console.error("[telegram] handler error:", e);
-    try {
-      await telegramReply(
-        chatIdStr,
-        "Something went wrong. Please try again in a moment.",
-        botToken
-      );
-    } catch {
-      /* ignore */
-    }
-  }
 
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true });
+  } catch (error: any) {
+    console.error(
+      "[telegram] FATAL webhook error:",
+      error?.message,
+      error?.stack,
+    );
+    return NextResponse.json({ ok: true });
+  }
 }
