@@ -68,6 +68,10 @@ model TelegramSession {
   chatId     String   @unique
   state      String   @default("idle") // "idle" | "meal_logging"
   foodItems  Json?
+  /// Rolling last 20 messages: [{ role: "user"|"assistant", content: string }]
+  conversationHistory Json?
+  /// Persistent weekly/user facts (height, weight, age, sex, activity, goals, BMR, TDEE)
+  weeklyContext Json?
   /// Stored demographics for BMR/TDEE (heightCm, weightKg, age, sex, activityLevel, etc.)
   userData   Json?
   mealType   String?

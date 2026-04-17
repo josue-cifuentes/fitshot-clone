@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { ensureWeekSheetExists } from "@/lib/googleSheets";
 import { weekSheetTitleForDate } from "@/lib/guatemala-week";
@@ -25,6 +26,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    await prisma.telegramSession.updateMany({
+      data: { conversationHistory: Prisma.JsonNull },
+    });
+
     try {
       await ensureWeekSheetExists(weekSheetTitleForDate(new Date()));
     } catch (error: unknown) {

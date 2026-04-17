@@ -91,7 +91,11 @@ const NUTRITION_SYSTEM = `You are a personal nutrition and fitness assistant. Th
 /** Idle-state Telegram assistant (Gemini 2.5 Flash). */
 export async function nutritionAssistantReply(
   userMessage: string,
-  userData: Record<string, unknown> | null
+  userData: Record<string, unknown> | null,
+  options?: {
+    conversationHistory?: Array<{ role: "user" | "assistant"; content: string }>;
+    weeklyContext?: Record<string, unknown> | null;
+  }
 ): Promise<string> {
   const genAI = new GoogleGenerativeAI(requireGeminiKey());
   const model = genAI.getGenerativeModel({
@@ -107,9 +111,22 @@ export async function nutritionAssistantReply(
     userData && Object.keys(userData).length > 0
       ? `Stored user data (JSON, use for BMR/TDEE when relevant — do not re-ask if already present): ${JSON.stringify(userData)}`
       : "No stored user data yet; you may ask once for height, weight, age, sex, and activity level if needed for BMR/TDEE.";
+  const weeklyProfile =
+    options?.weeklyContext && Object.keys(options.weeklyContext).length > 0
+      ? `User profile: ${JSON.stringify(options.weeklyContext)}\nUse this data to answer without asking again.`
+      : "User profile: {}";
+  const history =
+    options?.conversationHistory && options.conversationHistory.length > 0
+      ? `Conversation history (oldest first):\n${options.conversationHistory
+          .map((m) => `${m.role}: ${m.content}`)
+          .join("\n")
+          .slice(0, 6000)}`
+      : "Conversation history: []";
 
   try {
-    const prompt = `${profile}\n\nUser message:\n"""${userMessage.replace(/"""/g, "'").slice(0, 4000)}"""`;
+    const prompt = `${weeklyProfile}\n\n${profile}\n\n${history}\n\nLatest user message:\n"""${userMessage
+      .replace(/"""/g, "'")
+      .slice(0, 4000)}"""`;
     const result = await model.generateContent(prompt, { signal: controller.signal });
     return result.response.text().trim().slice(0, 3500) || "How can I help with nutrition or fitness today?";
   } finally {
@@ -130,8 +147,11 @@ export async function extractUserDemographicsFromMessage(
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-  const prompt = `Read the user message and extract only clearly stated biometrics for nutrition.
-Return ONLY a JSON object (no markdown) with zero or more of these keys: "heightCm" (number), "weightKg" (number), "age" (integer), "sex" ("m" or "f"), "activityLevel" (one of: sedentary, lightly_active, moderately_active, very_active).
+  const prompt = `Read the user message and extract only clearly stated biometrics/context for nutrition.
+Return ONLY a JSON object (no markdown) with zero or more of these keys:
+"heightCm" (number), "weightKg" (number), "age" (integer), "sex" ("m" or "f"),
+"activityLevel" (one of: sedentary, lightly_active, moderately_active, very_active),
+"calorieGoal" (number kcal/day), "bmr" (number), "tdee" (number).
 If nothing is stated, return {}.
 
 User message:
@@ -160,6 +180,15 @@ User message:
       )
     ) {
       out.activityLevel = parsed.activityLevel;
+    }
+    if (typeof parsed.calorieGoal === "number" && Number.isFinite(parsed.calorieGoal)) {
+      out.calorieGoal = Math.round(parsed.calorieGoal);
+    }
+    if (typeof parsed.bmr === "number" && Number.isFinite(parsed.bmr)) {
+      out.bmr = Math.round(parsed.bmr);
+    }
+    if (typeof parsed.tdee === "number" && Number.isFinite(parsed.tdee)) {
+      out.tdee = Math.round(parsed.tdee);
     }
     return out;
   } catch {

@@ -70,6 +70,38 @@ function parseUserData(raw: unknown): Record<string, unknown> {
   return {};
 }
 
+type HistoryMessage = { role: "user" | "assistant"; content: string };
+
+function parseConversationHistory(raw: unknown): HistoryMessage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((x): x is { role?: unknown; content?: unknown } => !!x && typeof x === "object")
+    .map((x) => {
+      const role: HistoryMessage["role"] = x.role === "assistant" ? "assistant" : "user";
+      const content = typeof x.content === "string" ? x.content : "";
+      return { role, content };
+    })
+    .filter((x) => x.content.length > 0)
+    .slice(-20);
+}
+
+function appendHistory(
+  history: HistoryMessage[],
+  role: "user" | "assistant",
+  content: string
+): HistoryMessage[] {
+  const trimmed = content.trim();
+  if (!trimmed) return history.slice(-20);
+  return [...history, { role, content: trimmed }].slice(-20);
+}
+
+function parseWeeklyContext(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) };
+  }
+  return {};
+}
+
 function fmtCal(n: number): string {
   return `${n.toLocaleString("en-US")} cal`;
 }
@@ -149,6 +181,7 @@ export async function POST(req: NextRequest) {
   if (!token) {
     return NextResponse.json({ ok: true });
   }
+  const botToken = token;
 
   let body: {
     message?: { chat?: { id: number }; text?: string; photo?: { file_id: string }[] };
@@ -184,30 +217,81 @@ export async function POST(req: NextRequest) {
       create: { chatId: chatIdStr, state: "idle" },
     });
     console.log("Session loaded:", JSON.stringify(session));
+    let conversationHistory = parseConversationHistory(session.conversationHistory);
+    let weeklyContext = parseWeeklyContext(session.weeklyContext);
+
+    async function persistSessionUpdate(
+      payload:
+        | Prisma.TelegramSessionUpdateInput
+        | { data: Prisma.TelegramSessionUpdateInput }
+    ) {
+      const data = "data" in payload ? payload.data : payload;
+      session = await prisma.telegramSession.update({
+        where: { chatId: chatIdStr },
+        data,
+      });
+      conversationHistory = parseConversationHistory(session.conversationHistory);
+      weeklyContext = parseWeeklyContext(session.weeklyContext);
+      return session;
+    }
+
+    async function sendAssistantMessage(textOut: string) {
+      await telegramReply(chatIdStr, textOut, botToken);
+      conversationHistory = appendHistory(conversationHistory, "assistant", textOut);
+      await persistSessionUpdate({
+        conversationHistory: conversationHistory as Prisma.InputJsonValue,
+      });
+    }
+
+    if (text) {
+      conversationHistory = appendHistory(conversationHistory, "user", text);
+      await persistSessionUpdate({
+        conversationHistory: conversationHistory as Prisma.InputJsonValue,
+      });
+      try {
+        const delta = await extractUserDemographicsFromMessage(text);
+        if (Object.keys(delta).length > 0) {
+          weeklyContext = { ...weeklyContext, ...delta };
+          const mergedUserData = {
+            ...parseUserData(session.userData),
+            ...delta,
+          };
+          const row = await persistSessionUpdate({
+            weeklyContext: weeklyContext as Prisma.InputJsonValue,
+            userData: mergedUserData as Prisma.InputJsonValue,
+          });
+          logSessionUpdated("weeklyContext_merge", row);
+        }
+      } catch (e) {
+        console.error("[telegram] weeklyContext merge failed:", e);
+      }
+    } else if (photos && photos.length > 0) {
+      conversationHistory = appendHistory(conversationHistory, "user", "[photo]");
+      await persistSessionUpdate({
+        conversationHistory: conversationHistory as Prisma.InputJsonValue,
+      });
+    }
 
     if (!sessionExisted) {
-      await telegramReply(chatId, WELCOME_MESSAGE, token);
+      await sendAssistantMessage(WELCOME_MESSAGE);
     }
 
     if (photos && photos.length > 0) {
       if (!isAssistantTurn(session.waitingFor)) {
-        await telegramReply(
-          chatId,
-          "Finish the current meal step with a text reply first (meal type or portions).",
-          token
+        await sendAssistantMessage(
+          "Finish the current meal step with a text reply first (meal type or portions)."
         );
         return NextResponse.json({ ok: true });
       }
 
-      await telegramReply(chatId, "📸 Analyzing your food...", token);
+      await sendAssistantMessage("📸 Analyzing your food...");
 
       const best = photos[photos.length - 1];
-      const { base64, mimeType } = await downloadTelegramPhoto(best.file_id, token);
+      const { base64, mimeType } = await downloadTelegramPhoto(best.file_id, botToken);
       const items = await identifyFoodItems(base64, mimeType);
 
       if (items.length === 0) {
-        session = await prisma.telegramSession.update({
-          where: { chatId: chatIdStr },
+        session = await persistSessionUpdate({
           data: {
             state: "idle",
             foodItems: Prisma.JsonNull,
@@ -216,14 +300,9 @@ export async function POST(req: NextRequest) {
           },
         });
         logSessionUpdated("photo_no_food", session);
-        await telegramReply(
-          chatId,
-          "I couldn't spot food in that image. Send another photo 📸",
-          token
-        );
+        await sendAssistantMessage("I couldn't spot food in that image. Send another photo 📸");
       } else {
-        session = await prisma.telegramSession.update({
-          where: { chatId: chatIdStr },
+        session = await persistSessionUpdate({
           data: {
             state: "meal_logging",
             foodItems: items,
@@ -232,32 +311,25 @@ export async function POST(req: NextRequest) {
           },
         });
         logSessionUpdated("photo_identified_meal_type", session);
-        await telegramReply(
-          chatId,
-          `I see: ${items.join(", ")}.\n\nWhat meal is this? Reply with: Breakfast, Lunch, Dinner, or Snack`,
-          token
+        await sendAssistantMessage(
+          `I see: ${items.join(", ")}.\n\nWhat meal is this? Reply with: Breakfast, Lunch, Dinner, or Snack`
         );
       }
     } else if (text) {
       const setSheet = parseSetSheetCommand(text);
       if (setSheet) {
         if (!setSheet.ok) {
-          await telegramReply(
-            chatId,
-            "Usage: /setsheet YOUR_SHEET_ID\nPaste the spreadsheet ID or a full Google Sheets URL. Share the sheet with your service account email as Editor.",
-            token
+          await sendAssistantMessage(
+            "Usage: /setsheet YOUR_SHEET_ID\nPaste the spreadsheet ID or a full Google Sheets URL. Share the sheet with your service account email as Editor."
           );
           return NextResponse.json({ ok: true });
         }
-        session = await prisma.telegramSession.update({
-          where: { chatId: chatIdStr },
+        session = await persistSessionUpdate({
           data: { sheetId: setSheet.sheetId },
         });
         logSessionUpdated("setsheet", session);
-        await telegramReply(
-          chatId,
-          `Got it — I'll log meals to spreadsheet ${setSheet.sheetId}. Make sure that sheet is shared with your Google service account as Editor.`,
-          token
+        await sendAssistantMessage(
+          `Got it — I'll log meals to spreadsheet ${setSheet.sheetId}. Make sure that sheet is shared with your Google service account as Editor.`
         );
         return NextResponse.json({ ok: true });
       }
@@ -265,8 +337,7 @@ export async function POST(req: NextRequest) {
       if (session.waitingFor === "portions") {
         const items = foodItemsFromJson(session.foodItems);
         if (items.length === 0 || !session.mealType) {
-          session = await prisma.telegramSession.update({
-            where: { chatId: chatIdStr },
+          session = await persistSessionUpdate({
             data: {
               state: "idle",
               foodItems: Prisma.JsonNull,
@@ -275,11 +346,7 @@ export async function POST(req: NextRequest) {
             },
           });
           logSessionUpdated("recovery_portions_missing_data", session);
-          await telegramReply(
-            chatId,
-            "Something went wrong with the meal flow. Send a new photo 📸",
-            token
-          );
+          await sendAssistantMessage("Something went wrong with the meal flow. Send a new photo 📸");
         } else {
           const mealTypeForReply = session.mealType;
           const itemsWithSizes = items.map((item) => ({ item, size: text }));
@@ -355,8 +422,7 @@ export async function POST(req: NextRequest) {
             console.error("[telegram] persist meal:", e);
           }
 
-          session = await prisma.telegramSession.update({
-            where: { chatId: chatIdStr },
+          session = await persistSessionUpdate({
             data: {
               state: "idle",
               foodItems: Prisma.JsonNull,
@@ -372,21 +438,16 @@ export async function POST(req: NextRequest) {
             : total <= 0
               ? "Nothing to log (0 kcal)."
               : "Could not save this meal. Please try again.";
-          await telegramReply(chatId, `${intro}\n\n${tail}`, token);
+          await sendAssistantMessage(`${intro}\n\n${tail}`);
         }
       } else if (session.waitingFor === "meal_type") {
         const parsed = parseMealTypeReply(text);
         if (!parsed) {
-          await telegramReply(
-            chatId,
-            "Please reply with one of: Breakfast, Lunch, Dinner, or Snack.",
-            token
-          );
+          await sendAssistantMessage("Please reply with one of: Breakfast, Lunch, Dinner, or Snack.");
         } else {
           const items = foodItemsFromJson(session.foodItems);
           if (items.length === 0) {
-            session = await prisma.telegramSession.update({
-              where: { chatId: chatIdStr },
+            session = await persistSessionUpdate({
               data: {
                 state: "idle",
                 foodItems: Prisma.JsonNull,
@@ -395,52 +456,30 @@ export async function POST(req: NextRequest) {
               },
             });
             logSessionUpdated("recovery_meal_type_no_items", session);
-            await telegramReply(
-              chatId,
-              "Food list was lost. Send a new photo 📸",
-              token
-            );
+            await sendAssistantMessage("Food list was lost. Send a new photo 📸");
           } else {
-            session = await prisma.telegramSession.update({
-              where: { chatId: chatIdStr },
+            session = await persistSessionUpdate({
               data: {
                 mealType: parsed,
                 waitingFor: "portions",
               },
             });
             logSessionUpdated("meal_type_saved_portions", session);
-            await telegramReply(
-              chatId,
-              `Got it — ${labelMealType(parsed)}.\n\nHow much of each item did you eat? (e.g. 1 cup rice, 2 eggs)`,
-              token
+            await sendAssistantMessage(
+              `Got it — ${labelMealType(parsed)}.\n\nHow much of each item did you eat? (e.g. 1 cup rice, 2 eggs)`
             );
           }
         }
       } else if (isAssistantTurn(session.waitingFor)) {
         const userData = parseUserData(session.userData);
-        const reply = await nutritionAssistantReply(text, userData);
-        await telegramReply(chatId, reply, token);
-
-        void (async () => {
-          try {
-            const delta = await extractUserDemographicsFromMessage(text);
-            if (Object.keys(delta).length > 0) {
-              const merged = { ...userData, ...delta };
-              const row = await prisma.telegramSession.update({
-                where: { chatId: chatIdStr },
-                data: { userData: merged as Prisma.InputJsonValue },
-              });
-              logSessionUpdated("userData_merge", row);
-            }
-          } catch (e) {
-            console.error("[telegram] userData merge (non-blocking):", e);
-          }
-        })();
+        const reply = await nutritionAssistantReply(text, userData, {
+          conversationHistory,
+          weeklyContext,
+        });
+        await sendAssistantMessage(reply);
       } else {
-        await telegramReply(
-          chatId,
-          "Send a food photo to log a meal, or continue with a text reply for the current step.",
-          token
+        await sendAssistantMessage(
+          "Send a food photo to log a meal, or continue with a text reply for the current step."
         );
       }
     }
@@ -448,9 +487,9 @@ export async function POST(req: NextRequest) {
     console.error("[telegram] handler error:", e);
     try {
       await telegramReply(
-        chatId,
+        chatIdStr,
         "Something went wrong. Please try again in a moment.",
-        token
+        botToken
       );
     } catch {
       /* ignore */
